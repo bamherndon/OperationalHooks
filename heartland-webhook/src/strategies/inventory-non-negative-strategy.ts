@@ -319,7 +319,7 @@ export class InventoryNonNegativeStrategy
         try {
           await Promise.all(
             negatives.map((neg) => {
-              const url = `${base}#items/edit/${neg.item_id}`;
+              const url = `${base}/#items/edit/${neg.item_id}`;
               const text = `${neg.description} (${url}) has negative inventory balance`;
               return this.groupMeClient!.sendMessage(text);
             })
