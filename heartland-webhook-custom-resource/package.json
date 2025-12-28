@@ -1,0 +1,28 @@
+{
+  "name": "heartland-webhook-custom-resource",
+  "version": "1.0.0",
+  "description": "AWS Lambda custom resource that registers/deregisters a Heartland Retail webhook",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "npm run lint && tsc",
+    "zip": "npm run build && node scripts/make-zip.js",
+    "lint": "eslint . --ext .ts,.js",
+    "lint:fix": "eslint . --ext .ts,.js --fix"
+  },
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+      "@types/aws-lambda": "^8.10.134",
+      "@types/node": "^20.0.0",
+      "archiver": "^7.0.0",
+      "@aws-sdk/client-secrets-manager": "^3.632.0",
+      "eslint": "^9.0.0",
+      "@typescript-eslint/eslint-plugin": "^8.0.0",
+      "@typescript-eslint/parser": "^8.0.0",
+      "@eslint/js": "^9.0.0",
+      "globals": "^15.0.0",
+      "typescript": "^5.4.0"
+    }
+
+
+}

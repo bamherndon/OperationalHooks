@@ -1,0 +1,26 @@
+{
+  "name": "operational-hooks-cdk",
+  "version": "1.0.0",
+  "description": "CDK app that deploys Heartland webhook and custom resource",
+  "bin": {
+    "operational-hooks-cdk": "bin/operational-hooks-cdk.js"
+  },
+  "scripts": {
+    "build:deps": "(cd ../heartland-webhook && npm run build) && (cd ../heartland-webhook-custom-resource && npm run build)",
+    "build": "npm run build:deps && tsc",
+    "synth": "npm run build && cdk synth",
+    "deploy": "npm run build && cdk deploy",
+    "destroy": "npm run build && cdk destroy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.160.0",
+    "constructs": "^10.0.0",
+    "source-map-support": "^0.5.21"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "aws-cdk": "^2.160.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}
