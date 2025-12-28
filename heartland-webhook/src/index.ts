@@ -11,11 +11,11 @@ import {
   TransactionCompletionStrategy,
 } from './model';
 import {
-  DefaultHeartlandApiClient,
-  InventoryNonNegativeStrategy,
   DefaultGroupMeClient,
+  DefaultHeartlandApiClient,
   GroupMeClient,
-} from './strategies/inventory-non-negative-strategy';
+} from './clients';
+import { InventoryNonNegativeStrategy } from './strategies/inventory-non-negative-strategy';
 import {
   SecretsManagerClient,
   GetSecretValueCommand,

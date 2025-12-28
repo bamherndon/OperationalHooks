@@ -1,10 +1,10 @@
 // tests/inventory-non-negative-strategy.test.ts
+import { InventoryNonNegativeStrategy } from '../src/strategies/inventory-non-negative-strategy';
 import {
-  InventoryNonNegativeStrategy,
   HeartlandApiClient,
   TicketLinesResponse,
   InventoryValuesResponse,
-} from '../src/strategies/inventory-non-negative-strategy';
+} from '../src/clients';
 import { HeartlandTransaction } from '../src/model';
 
 describe('InventoryNonNegativeStrategy', () => {
@@ -195,5 +195,255 @@ describe('InventoryNonNegativeStrategy', () => {
     const result = await strategy.checkTx(baseTx);
 
     expect(result).toBe(true);
+  });
+
+  it('returns false when transaction id is missing', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const strategy = new InventoryNonNegativeStrategy(
+      makeMockClient({
+        lines: { total: 0, pages: 1, results: [] },
+        inventoryByItem: {},
+      }),
+      'https://example.heartland.test'
+    );
+
+    const badTx = { ...baseTx, id: undefined } as unknown as HeartlandTransaction;
+    expect(strategy.supports(badTx)).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it('returns false when source_location_id is missing', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const strategy = new InventoryNonNegativeStrategy(
+      makeMockClient({
+        lines: { total: 0, pages: 1, results: [] },
+        inventoryByItem: {},
+      }),
+      'https://example.heartland.test'
+    );
+
+    const badTx = {
+      ...baseTx,
+      source_location_id: undefined,
+    } as unknown as HeartlandTransaction;
+    expect(strategy.supports(badTx)).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it('returns false when transaction type is not Ticket or Return', () => {
+    const strategy = new InventoryNonNegativeStrategy(
+      makeMockClient({
+        lines: { total: 0, pages: 1, results: [] },
+        inventoryByItem: {},
+      }),
+      'https://example.heartland.test'
+    );
+
+    const badTx = { ...baseTx, type: 'Quote' } as HeartlandTransaction;
+    expect(strategy.supports(badTx)).toBe(false);
+  });
+
+  it('passes when no ItemLine rows exist', async () => {
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        { id: 1, type: 'TaxLine' },
+      ],
+    };
+
+    const mockClient = makeMockClient({
+      lines,
+      inventoryByItem: {},
+    });
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test'
+    );
+
+    const result = await strategy.checkTx(baseTx);
+    expect(result).toBe(true);
+    expect(mockClient.getInventoryValues).not.toHaveBeenCalled();
+  });
+
+  it('fails when ticket lines cannot be retrieved', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const mockClient: HeartlandApiClient = {
+      getTicketLines: jest.fn().mockRejectedValue(new Error('boom')),
+      getInventoryValues: jest.fn(),
+    };
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test'
+    );
+
+    const result = await strategy.checkTx(baseTx);
+    expect(result).toBe(false);
+
+    errorSpy.mockRestore();
+  });
+
+  it('fails when inventory values cannot be retrieved', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        { id: 1, type: 'ItemLine', item_id: 2001 },
+      ],
+    };
+
+    const mockClient: HeartlandApiClient = {
+      getTicketLines: jest.fn().mockResolvedValue(lines),
+      getInventoryValues: jest.fn().mockRejectedValue(new Error('boom')),
+    };
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test'
+    );
+
+    const result = await strategy.checkTx(baseTx);
+    expect(result).toBe(false);
+
+    errorSpy.mockRestore();
+  });
+
+  it('fails and warns when negatives exist without a GroupMe client', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        { id: 1, type: 'ItemLine', item_id: 2001 },
+      ],
+    };
+
+    const inventoryForItem2001: InventoryValuesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          item_id: 2001,
+          location_id: 100005,
+          qty_on_hand: -1,
+        },
+      ],
+    };
+
+    const mockClient = makeMockClient({
+      lines,
+      inventoryByItem: {
+        2001: inventoryForItem2001,
+      },
+    });
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test'
+    );
+
+    const result = await strategy.checkTx(baseTx);
+    expect(result).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it('uses item description for GroupMe alerts', async () => {
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          id: 1,
+          type: 'ItemLine',
+          item_id: 2001,
+          item_description: 'Fancy widget',
+        },
+      ],
+    };
+
+    const inventoryForItem2001: InventoryValuesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          item_id: 2001,
+          location_id: 100005,
+          qty_on_hand: -2,
+        },
+      ],
+    };
+
+    const mockClient = makeMockClient({
+      lines,
+      inventoryByItem: {
+        2001: inventoryForItem2001,
+      },
+    });
+
+    const mockGroupMeClient = {
+      sendMessage: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test',
+      mockGroupMeClient
+    );
+
+    await strategy.checkTx(baseTx);
+    expect(mockGroupMeClient.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Fancy widget')
+    );
+  });
+
+  it('swallows GroupMe errors and still fails the check', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        { id: 1, type: 'ItemLine', item_id: 2001 },
+      ],
+    };
+
+    const inventoryForItem2001: InventoryValuesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          item_id: 2001,
+          location_id: 100005,
+          qty_on_hand: -2,
+        },
+      ],
+    };
+
+    const mockClient = makeMockClient({
+      lines,
+      inventoryByItem: {
+        2001: inventoryForItem2001,
+      },
+    });
+
+    const mockGroupMeClient = {
+      sendMessage: jest.fn().mockRejectedValue(new Error('groupme down')),
+    };
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test',
+      mockGroupMeClient
+    );
+
+    const result = await strategy.checkTx(baseTx);
+    expect(result).toBe(false);
+
+    errorSpy.mockRestore();
   });
 });
