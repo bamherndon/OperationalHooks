@@ -16,6 +16,8 @@ import {
   GroupMeClient,
 } from './clients';
 import { InventoryNonNegativeStrategy } from './strategies/inventory-non-negative-strategy';
+import { PriceAdjustedItemStrategy } from './strategies/price-adjusted-item-strategy';
+import { HighDiscountTicketStrategy } from './strategies/high-discount-ticket-strategy';
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
@@ -164,6 +166,8 @@ async function buildDefaultCompletionStrategies(): Promise<TransactionCompletion
       groupMeClient = new DefaultGroupMeClient(botId);
     }
     
+    strategies.push(new PriceAdjustedItemStrategy(apiClient, groupMeClient));
+    strategies.push(new HighDiscountTicketStrategy(groupMeClient));
     strategies.push(
       new InventoryNonNegativeStrategy(apiClient, baseUrl, groupMeClient)
     );
