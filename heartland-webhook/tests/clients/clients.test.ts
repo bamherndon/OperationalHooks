@@ -5,7 +5,7 @@ import {
   DefaultHeartlandApiClient,
   buildHeartlandUrl,
   httpGetJson,
-} from '../src/clients';
+} from '../../src/clients';
 
 jest.mock('https');
 

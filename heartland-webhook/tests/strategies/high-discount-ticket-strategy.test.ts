@@ -1,5 +1,5 @@
-import { HighDiscountTicketStrategy } from '../src/strategies/high-discount-ticket-strategy';
-import { HeartlandTransaction } from '../src/model';
+import { HighDiscountTicketStrategy } from '../../src/strategies/high-discount-ticket-strategy';
+import { HeartlandTransaction } from '../../src/model';
 
 describe('HighDiscountTicketStrategy', () => {
   const baseTx: HeartlandTransaction = {

@@ -1,6 +1,6 @@
-import { PriceAdjustedItemStrategy } from '../src/strategies/price-adjusted-item-strategy';
-import { HeartlandApiClient, TicketLinesResponse } from '../src/clients';
-import { HeartlandTransaction } from '../src/model';
+import { PriceAdjustedItemStrategy } from '../../src/strategies/price-adjusted-item-strategy';
+import { HeartlandApiClient, TicketLinesResponse } from '../../src/clients';
+import { HeartlandTransaction } from '../../src/model';
 
 describe('PriceAdjustedItemStrategy', () => {
   const baseTx: HeartlandTransaction = {

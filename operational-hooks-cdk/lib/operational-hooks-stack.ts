@@ -25,13 +25,13 @@ export class OperationalHooksStack extends cdk.Stack {
      * 1) Webhook handler Lambda
      *    Code comes from ../heartland-webhook/dist (compiled TS).
      */
-    const webhookFn = new lambda.Function(this, 'HeartlandWebhookFn', {
+    const transactionWebhookFn = new lambda.Function(this, 'HeartlandTransactionWebhookFn', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      handler: 'index.handler', // index.js in dist, exported "handler"
+      handler: 'handlers/transaction/index.handler', // dist/handlers/transaction/index.js
       code: lambda.Code.fromAsset(
         path.join(__dirname, '..', '..', 'heartland-webhook', 'dist')
       ),
-      description: 'Receives Heartland Retail webhook events (e.g., sales_transaction_completed)',
+      description: 'Receives Heartland Retail sales_transaction_completed webhook events',
       timeout: cdk.Duration.seconds(10),
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
@@ -42,10 +42,10 @@ export class OperationalHooksStack extends cdk.Stack {
     });
     
     // allow webhook Lambda to read the token secret
-    heartlandSecret.grantRead(webhookFn);
+    heartlandSecret.grantRead(transactionWebhookFn);
 
     // Lambda Function URL (public) so Heartland can POST directly
-    const webhookFnUrl = webhookFn.addFunctionUrl({
+    const webhookFnUrl = transactionWebhookFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
 
@@ -54,6 +54,27 @@ export class OperationalHooksStack extends cdk.Stack {
       description: 'Public Lambda Function URL for Heartland webhook',
     });
 
+    /**
+     * 1b) Item-created handler Lambda
+     */
+    const itemCreatedFn = new lambda.Function(this, 'HeartlandItemCreatedFn', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'handlers/item/index.handler',
+      code: lambda.Code.fromAsset(
+        path.join(__dirname, '..', '..', 'heartland-webhook', 'dist')
+      ),
+      description: 'Receives Heartland Retail item_created webhook events',
+      timeout: cdk.Duration.seconds(10),
+    });
+
+    const itemCreatedFnUrl = itemCreatedFn.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE,
+    });
+
+    new cdk.CfnOutput(this, 'ItemCreatedFunctionUrl', {
+      value: itemCreatedFnUrl.url,
+      description: 'Public Lambda Function URL for Heartland item_created webhook',
+    });
     /**
      * 2) Custom resource Lambda that registers/deregisters the webhook.
      *    Uses the compiled JS from ../heartland-webhook-custom-resource/dist.
@@ -116,11 +137,31 @@ export class OperationalHooksStack extends cdk.Stack {
       }
     );
 
+    const itemCreatedEvents = ['item_created'];
+
+    const itemCreatedWebhookRegistration = new cdk.CustomResource(
+      this,
+      'HeartlandItemCreatedWebhookRegistration',
+      {
+        serviceToken: provider.serviceToken,
+        properties: {
+          WebhookUrl: itemCreatedFnUrl.url,
+          Events: itemCreatedEvents,
+        },
+      }
+    );
+
     // Expose Heartland Webhook ID returned by your custom-resource Lambda
     new cdk.CfnOutput(this, 'HeartlandWebhookId', {
       value: webhookRegistration.getAttString('WebhookId'),
       description:
         'Webhook ID returned by Heartland when registering the webhook',
+    });
+
+    new cdk.CfnOutput(this, 'HeartlandItemCreatedWebhookId', {
+      value: itemCreatedWebhookRegistration.getAttString('WebhookId'),
+      description:
+        'Webhook ID returned by Heartland when registering the item_created webhook',
     });
   }
 }

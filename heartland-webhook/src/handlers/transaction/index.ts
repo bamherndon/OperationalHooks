@@ -9,15 +9,15 @@ import {
   CheckSummary,
   WebhookResponseBody,
   TransactionCompletionStrategy,
-} from './model';
+} from '../../model';
 import {
   DefaultGroupMeClient,
   DefaultHeartlandApiClient,
   GroupMeClient,
-} from './clients';
-import { InventoryNonNegativeStrategy } from './strategies/inventory-non-negative-strategy';
-import { PriceAdjustedItemStrategy } from './strategies/price-adjusted-item-strategy';
-import { HighDiscountTicketStrategy } from './strategies/high-discount-ticket-strategy';
+} from '../../clients';
+import { InventoryNonNegativeStrategy } from '../../strategies/inventory-non-negative-strategy';
+import { PriceAdjustedItemStrategy } from '../../strategies/price-adjusted-item-strategy';
+import { HighDiscountTicketStrategy } from '../../strategies/high-discount-ticket-strategy';
 import {
   SecretsManagerClient,
   GetSecretValueCommand,

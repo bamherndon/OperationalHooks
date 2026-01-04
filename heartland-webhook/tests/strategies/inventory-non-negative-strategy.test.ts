@@ -1,11 +1,11 @@
 // tests/inventory-non-negative-strategy.test.ts
-import { InventoryNonNegativeStrategy } from '../src/strategies/inventory-non-negative-strategy';
+import { InventoryNonNegativeStrategy } from '../../src/strategies/inventory-non-negative-strategy';
 import {
   HeartlandApiClient,
   TicketLinesResponse,
   InventoryValuesResponse,
-} from '../src/clients';
-import { HeartlandTransaction } from '../src/model';
+} from '../../src/clients';
+import { HeartlandTransaction } from '../../src/model';
 
 describe('InventoryNonNegativeStrategy', () => {
   const baseTx: HeartlandTransaction = {
