@@ -72,7 +72,11 @@ export class HighDiscountTicketStrategy
         )
       );
 
-      if (!this.groupMeClient) {
+      if (totalDiscounts <= 5) {
+        console.warn(
+          `[${this.name}] Discount <= $5; skipping GroupMe alerts`
+        );
+      } else if (!this.groupMeClient) {
         console.warn(
           `[${this.name}] No GroupMe client configured; skipping GroupMe alerts`
         );

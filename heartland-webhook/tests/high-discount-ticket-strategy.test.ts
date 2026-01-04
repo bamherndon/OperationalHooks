@@ -60,4 +60,43 @@ describe('HighDiscountTicketStrategy', () => {
       'Ticket 117060 (  https://bamherndon.retail.heartland.us/#sales/tickets/edit/117060  )  -  200 was discounted by 10.00%'
     );
   });
+
+  it('skips GroupMe when discount is $5 or less', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const mockGroupMeClient = {
+      sendMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const strategy = new HighDiscountTicketStrategy(mockGroupMeClient);
+    const tx = {
+      ...baseTx,
+      original_subtotal: 50,
+      total_discounts: 5,
+    } as HeartlandTransaction;
+
+    const result = await strategy.checkTx(tx);
+
+    expect(result).toBe(false);
+    expect(mockGroupMeClient.sendMessage).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('handles GroupMe send failures', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const mockGroupMeClient = {
+      sendMessage: jest.fn().mockRejectedValue(new Error('groupme down')),
+    };
+    const strategy = new HighDiscountTicketStrategy(mockGroupMeClient);
+    const tx = {
+      ...baseTx,
+      original_subtotal: 100,
+      total_discounts: 10,
+    } as HeartlandTransaction;
+
+    const result = await strategy.checkTx(tx);
+
+    expect(result).toBe(false);
+
+    errorSpy.mockRestore();
+  });
 });

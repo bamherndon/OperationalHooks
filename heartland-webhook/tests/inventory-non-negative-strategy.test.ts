@@ -446,4 +446,58 @@ describe('InventoryNonNegativeStrategy', () => {
 
     errorSpy.mockRestore();
   });
+
+  it('ignores excluded item ids', async () => {
+    const lines: TicketLinesResponse = {
+      total: 2,
+      pages: 1,
+      results: [
+        { id: 1, type: 'ItemLine', item_id: 101996 },
+        { id: 2, type: 'ItemLine', item_id: 2001 },
+      ],
+    };
+
+    const inventoryForExcluded: InventoryValuesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          item_id: 101996,
+          location_id: 100005,
+          qty_on_hand: -10,
+        },
+      ],
+    };
+
+    const inventoryForItem2001: InventoryValuesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          item_id: 2001,
+          location_id: 100005,
+          qty_on_hand: 5,
+        },
+      ],
+    };
+
+    const mockClient = makeMockClient({
+      lines,
+      inventoryByItem: {
+        101996: inventoryForExcluded,
+        2001: inventoryForItem2001,
+      },
+    });
+
+    const strategy = new InventoryNonNegativeStrategy(
+      mockClient,
+      'https://example.heartland.test'
+    );
+
+    const result = await strategy.checkTx(baseTx);
+
+    expect(result).toBe(true);
+    expect(mockClient.getInventoryValues).toHaveBeenCalledTimes(1);
+    expect(mockClient.getInventoryValues).toHaveBeenCalledWith(2001);
+  });
 });

@@ -144,6 +144,36 @@ describe('PriceAdjustedItemStrategy', () => {
     );
   });
 
+  it('uses unknown values when prices are missing', async () => {
+    const lines: TicketLinesResponse = {
+      total: 1,
+      pages: 1,
+      results: [
+        {
+          id: 291127,
+          type: 'ItemLine',
+          item_id: 105398,
+          description: 'Batwing',
+          adjusted_unit_price: 15,
+        },
+      ],
+    };
+
+    const mockGroupMeClient = {
+      sendMessage: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const strategy = new PriceAdjustedItemStrategy(
+      makeMockClient(lines),
+      mockGroupMeClient
+    );
+    await strategy.checkTx(baseTx);
+
+    expect(mockGroupMeClient.sendMessage).toHaveBeenCalledWith(
+      'Item Batwing price was adjusted by unknown from unknown to 15 in ticket 117060 ( https://bamherndon.retail.heartland.us/#sales/tickets/edit/117060 )'
+     );
+  });
+
   it('fails when ticket lines cannot be retrieved', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const mockClient: HeartlandApiClient = {

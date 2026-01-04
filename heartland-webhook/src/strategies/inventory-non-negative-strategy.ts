@@ -20,6 +20,11 @@ export class InventoryNonNegativeStrategy
   implements TransactionCompletionStrategy
 {
   public readonly name = 'inventory-non-negative';
+  private static readonly EXCLUDED_ITEM_IDS = new Set<number>([
+    101996,
+    106379,
+    102112
+  ]);
 
   constructor(
     private readonly apiClient: HeartlandApiClient,
@@ -74,6 +79,10 @@ export class InventoryNonNegativeStrategy
 
     for (const line of linesResponse.results ?? []) {
       if (line.type === 'ItemLine' && typeof line.item_id === 'number') {
+        if (InventoryNonNegativeStrategy.EXCLUDED_ITEM_IDS.has(line.item_id)) {
+          continue;
+        }
+
         const desc =
           line.item_description ??
           line.description ??
@@ -90,7 +99,9 @@ export class InventoryNonNegativeStrategy
         (linesResponse.results ?? [])
           .filter(
             (line) =>
-              line.type === 'ItemLine' && typeof line.item_id === 'number'
+              line.type === 'ItemLine' &&
+              typeof line.item_id === 'number' &&
+              !InventoryNonNegativeStrategy.EXCLUDED_ITEM_IDS.has(line.item_id)
           )
           .map((line) => line.item_id as number)
       )
@@ -123,17 +134,8 @@ export class InventoryNonNegativeStrategy
 
     // 2. For each item, retrieve inventory values grouped by item+location
     for (const itemId of itemIds) {
-      let invResponse: InventoryValuesResponse;
       try {
-        invResponse = await this.apiClient.getInventoryValues(itemId);
-      } catch (err) {
-        console.error(
-          `[${this.name}] Error retrieving inventory values`,
-          JSON.stringify({ itemId, error: String(err) }, null, 2)
-        );
-        // Fail the check if we can't validate inventory
-        return false;
-      }
+        const invResponse = await this.apiClient.getInventoryValues(itemId);
 
       for (const row of invResponse.results ?? []) {
         // If a location_id is present, restrict to the ticket's location
@@ -169,6 +171,14 @@ export class InventoryNonNegativeStrategy
             description,
           });
         }
+      }
+      } catch (err) {
+        console.error(
+          `[${this.name}] Error retrieving inventory values`,
+          JSON.stringify({ itemId, error: String(err) }, null, 2)
+        );
+        // Fail the check if we can't validate inventory
+        return false;
       }
     }
 
