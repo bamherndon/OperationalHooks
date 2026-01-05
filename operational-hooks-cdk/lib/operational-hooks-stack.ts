@@ -102,6 +102,11 @@ export class OperationalHooksStack extends cdk.Stack {
       value: itemCreatedFnUrl.url,
       description: 'Public Lambda Function URL for Heartland item_created webhook',
     });
+
+    new cdk.CfnOutput(this, 'LambdaNatEipAddress', {
+      value: natEip.ref,
+      description: 'Elastic IP address used by the NAT Gateway for Lambda egress',
+    });
     /**
      * 2) Custom resource Lambda that registers/deregisters the webhook.
      *    Uses the compiled JS from ../heartland-webhook-custom-resource/dist.

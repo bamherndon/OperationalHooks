@@ -3,6 +3,7 @@ import * as https from 'https';
 import {
   DefaultGroupMeClient,
   DefaultHeartlandApiClient,
+  DefaultBrickLinkClient,
   buildHeartlandUrl,
   httpGetJson,
 } from '../../src/clients';
@@ -299,6 +300,115 @@ describe('clients', () => {
 
     await expect(client.sendMessage('Hello team')).rejects.toThrow(
       'socket fail'
+    );
+  });
+
+  it('DefaultBrickLinkClient getItem returns item data on success', async () => {
+    const body = JSON.stringify({
+      meta: { code: 200 },
+      data: {
+        item: { no: '31119-1', type: 'SET', name: 'Ferris Wheel' },
+        image_url: 'https://img.example/31119.jpg',
+      },
+    });
+    const { res, emitBody } = makeMockResponse(200, body);
+
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultBrickLinkClient(
+      'ck-123',
+      'cs-456',
+      'tv-789',
+      'ts-abc'
+    );
+
+    const item = await client.getItem('SET', '31119-1');
+
+    expect(item).toEqual({
+      item: { no: '31119-1', type: 'SET', name: 'Ferris Wheel' },
+      image_url: 'https://img.example/31119.jpg',
+    });
+
+    expect(mockedHttps.get).toHaveBeenCalledTimes(1);
+    expect(mockedHttps.get.mock.calls[0][0]).toBe(
+      'https://api.bricklink.com/api/store/v1/items/SET/31119-1'
+    );
+
+    const options = mockedHttps.get.mock.calls[0][1] as {
+      headers?: Record<string, string>;
+    };
+    expect(options.headers?.Authorization).toContain('OAuth ');
+    expect(options.headers?.Authorization).toContain('oauth_consumer_key="ck-123"');
+    expect(options.headers?.Authorization).toContain('oauth_token="tv-789"');
+    expect(options.headers?.Authorization).toContain('oauth_signature_method="HMAC-SHA1"');
+    expect(options.headers?.Authorization).toContain('oauth_version="1.0"');
+    expect(options.headers?.Authorization).toContain('oauth_signature=');
+  });
+
+  it('DefaultBrickLinkClient getItem rejects when meta.code is not 200', async () => {
+    const body = JSON.stringify({
+      meta: { code: 401, message: 'Unauthorized' },
+      data: {},
+    });
+    const { res, emitBody } = makeMockResponse(200, body);
+
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultBrickLinkClient(
+      'ck-123',
+      'cs-456',
+      'tv-789',
+      'ts-abc'
+    );
+
+    await expect(client.getItem('SET', '31119-1')).rejects.toThrow(
+      'BrickLink API error: meta.code=401'
+    );
+  });
+
+  it('DefaultBrickLinkClient getItem rejects on non-2xx HTTP responses', async () => {
+    const { res, emitBody } = makeMockResponse(500, 'server down');
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultBrickLinkClient(
+      'ck-123',
+      'cs-456',
+      'tv-789',
+      'ts-abc'
+    );
+
+    await expect(client.getItem('SET', '31119-1')).rejects.toThrow(
+      'HTTP 500 from BrickLink API: server down'
     );
   });
 });
