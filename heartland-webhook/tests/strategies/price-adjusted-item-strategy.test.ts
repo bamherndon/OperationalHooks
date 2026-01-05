@@ -13,6 +13,9 @@ describe('PriceAdjustedItemStrategy', () => {
     return {
       getTicketLines: jest.fn().mockResolvedValue(lines),
       getInventoryValues: jest.fn(),
+      getInventoryItem: jest.fn(),
+      updateInventoryItem: jest.fn(),
+      updateInventoryItemImage: jest.fn(),
     };
   };
 
@@ -179,6 +182,9 @@ describe('PriceAdjustedItemStrategy', () => {
     const mockClient: HeartlandApiClient = {
       getTicketLines: jest.fn().mockRejectedValue(new Error('boom')),
       getInventoryValues: jest.fn(),
+      getInventoryItem: jest.fn(),
+      updateInventoryItem: jest.fn(),
+      updateInventoryItemImage: jest.fn(),
     };
 
     const strategy = new PriceAdjustedItemStrategy(mockClient);

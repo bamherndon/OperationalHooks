@@ -6,6 +6,9 @@ import {
   DefaultBrickLinkClient,
   buildHeartlandUrl,
   httpGetJson,
+  httpPutJson,
+  httpPostJson,
+  httpGetBrickLinkJson,
 } from '../../src/clients';
 
 jest.mock('https');
@@ -150,6 +153,247 @@ describe('clients', () => {
     await expect(
       httpGetJson('https://example.test/api/error', 'token-123')
     ).rejects.toThrow('boom');
+  });
+
+  it('httpPutJson sends payload and resolves on success', async () => {
+    const { res, emitBody } = makeMockResponse(200, JSON.stringify({ ok: true }));
+
+    let writtenPayload = '';
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: (payload: string) => {
+            writtenPayload += payload;
+          },
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    const result = await httpPutJson<{ ok: boolean }>(
+      'https://example.test/api/items/1',
+      'token-123',
+      { name: 'Widget' }
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(writtenPayload)).toEqual({ name: 'Widget' });
+  });
+
+  it('httpPutJson rejects on non-2xx responses', async () => {
+    const { res, emitBody } = makeMockResponse(500, 'nope');
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPutJson('https://example.test/api/items/1', 'token-123', {})
+    ).rejects.toThrow('HTTP 500 from Heartland API: nope');
+  });
+
+  it('httpPutJson rejects when no response is provided', async () => {
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter | undefined) => void
+      ) => {
+        callback(undefined);
+        return { on: jest.fn(), write: () => {}, end: () => {} } as unknown;
+      }
+    );
+
+    await expect(
+      httpPutJson('https://example.test/api/items/1', 'token-123', {})
+    ).rejects.toThrow('No response from Heartland API');
+  });
+
+  it('httpPutJson rejects when JSON parsing fails', async () => {
+    const { res, emitBody } = makeMockResponse(200, '{not-json}');
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPutJson('https://example.test/api/items/1', 'token-123', {})
+    ).rejects.toBeInstanceOf(Error);
+  });
+
+  it('httpPutJson rejects on request error event', async () => {
+    mockedHttps.request.mockImplementation(
+      (_url: string, _options: Record<string, unknown>, _callback: () => void) => {
+        return {
+          on: (event: string, cb: (err: Error) => void) => {
+            if (event === 'error') {
+              process.nextTick(() => cb(new Error('put boom')));
+            }
+          },
+          write: () => {},
+          end: () => {},
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPutJson('https://example.test/api/items/1', 'token-123', {})
+    ).rejects.toThrow('put boom');
+  });
+
+  it('httpPostJson resolves on success', async () => {
+    const { res, emitBody } = makeMockResponse(201, JSON.stringify({ ok: true }));
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    const result = await httpPostJson<{ ok: boolean }>(
+      'https://example.test/api/items/1/images',
+      'token-123',
+      { source: 'url', url: 'https://img.test/1.jpg' }
+    );
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('httpPostJson rejects on non-2xx responses', async () => {
+    const { res, emitBody } = makeMockResponse(400, 'bad');
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPostJson('https://example.test/api/items/1/images', 'token-123', {
+        source: 'url',
+        url: 'https://img.test/1.jpg',
+      })
+    ).rejects.toThrow('HTTP 400 from Heartland API: bad');
+  });
+
+  it('httpPostJson rejects when JSON parsing fails', async () => {
+    const { res, emitBody } = makeMockResponse(200, '{not-json}');
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPostJson('https://example.test/api/items/1/images', 'token-123', {
+        source: 'url',
+        url: 'https://img.test/1.jpg',
+      })
+    ).rejects.toBeInstanceOf(Error);
+  });
+
+  it('httpPostJson rejects on request error event', async () => {
+    mockedHttps.request.mockImplementation(
+      (_url: string, _options: Record<string, unknown>, _callback: () => void) => {
+        return {
+          on: (event: string, cb: (err: Error) => void) => {
+            if (event === 'error') {
+              process.nextTick(() => cb(new Error('post boom')));
+            }
+          },
+          write: () => {},
+          end: () => {},
+        } as unknown;
+      }
+    );
+
+    await expect(
+      httpPostJson('https://example.test/api/items/1/images', 'token-123', {
+        source: 'url',
+        url: 'https://img.test/1.jpg',
+      })
+    ).rejects.toThrow('post boom');
+  });
+
+  it('httpGetBrickLinkJson rejects when no response is provided', async () => {
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter | undefined) => void
+      ) => {
+        callback(undefined);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    await expect(
+      httpGetBrickLinkJson('https://api.bricklink.test/items/SET/1', 'OAuth test')
+    ).rejects.toThrow('No response from BrickLink API');
   });
 
   it('DefaultHeartlandApiClient builds ticket lines URL', async () => {
@@ -301,6 +545,57 @@ describe('clients', () => {
     await expect(client.sendMessage('Hello team')).rejects.toThrow(
       'socket fail'
     );
+  });
+
+  it('DefaultHeartlandApiClient updateInventoryItemImage posts image payload', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ ok: true })
+    );
+
+    let writtenPayload = '';
+    mockedHttps.request.mockImplementation(
+      (
+        url: string,
+        options: { method?: string; headers?: Record<string, string> },
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: (payload: string) => {
+            writtenPayload += payload;
+          },
+          end: () => {
+            process.nextTick(emitBody);
+          },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient(
+      'https://heartland.example',
+      'token-abc'
+    );
+
+    await client.updateInventoryItemImage(123, 'https://images.example/item.jpg');
+
+    expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+    expect(mockedHttps.request.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/inventory/items/123/images'
+    );
+    expect(mockedHttps.request.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer token-abc',
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(writtenPayload).toString(),
+      },
+    });
+    expect(JSON.parse(writtenPayload)).toEqual({
+      source: 'url',
+      url: 'https://images.example/item.jpg',
+    });
   });
 
   it('DefaultBrickLinkClient getItem returns item data on success', async () => {

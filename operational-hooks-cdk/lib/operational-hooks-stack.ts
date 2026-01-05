@@ -12,14 +12,22 @@ export class OperationalHooksStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-     const heartlandSecretArn =
-      'arn:aws:secretsmanager:us-east-1:445473841172:secret:heartland-api-token-PgcltJ';
+     const operationalSecretsArnParam = new cdk.CfnParameter(
+      this,
+      'OperationalSecretsArn',
+      {
+        type: 'String',
+        description: 'Secrets Manager ARN for the OperationalSecrets JSON',
+        default:
+          'arn:aws:secretsmanager:us-east-1:445473841172:secret:OperationalSecrets',
+      }
+    );
 
     // Represent the existing secret in this stack
-    const heartlandSecret = secretsmanager.Secret.fromSecretCompleteArn(
+    const operationalSecrets = secretsmanager.Secret.fromSecretCompleteArn(
       this,
-      'HeartlandApiTokenSecret',
-      heartlandSecretArn
+      'OperationalSecrets',
+      operationalSecretsArnParam.valueAsString
     );
 
     const natEip = new ec2.CfnEIP(this, 'LambdaNatEip', {
@@ -60,14 +68,14 @@ export class OperationalHooksStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        HEARTLAND_SECRET_ARN: heartlandSecretArn,
+        OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
         GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
       },
 
     });
     
     // allow webhook Lambda to read the token secret
-    heartlandSecret.grantRead(transactionWebhookFn);
+    operationalSecrets.grantRead(transactionWebhookFn);
 
     // Lambda Function URL (public) so Heartland can POST directly
     const webhookFnUrl = transactionWebhookFn.addFunctionUrl({
@@ -92,6 +100,10 @@ export class OperationalHooksStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(10),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      environment: {
+        HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
+        OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
+      },
     });
 
     const itemCreatedFnUrl = itemCreatedFn.addFunctionUrl({
@@ -135,13 +147,13 @@ export class OperationalHooksStack extends cdk.Stack {
         vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         environment: {
-          HEARTLAND_SECRET_ARN: heartlandSecretArn,
+          OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
         },
       }
     );
     
     // 👇 Grant the Lambda permission to read the secret
-    heartlandSecret.grantRead(registerWebhookFn);
+    operationalSecrets.grantRead(registerWebhookFn);
 
     /**
      * 3) Custom Resource Provider wiring

@@ -21,9 +21,9 @@ export const handler = async (
 ) => {
   console.log('Custom resource event:', JSON.stringify(event, null, 2));
 
-  const secretArn = process.env.HEARTLAND_SECRET_ARN;
+  const secretArn = process.env.OPERATIONAL_SECRET_ARN;
   if (!secretArn) {
-    throw new Error('HEARTLAND_SECRET_ARN environment variable is not set');
+    throw new Error('OPERATIONAL_SECRET_ARN environment variable is not set');
   }
 
   // v3 client (runtime-included in Node.js 18+ Lambda)
@@ -38,10 +38,12 @@ export const handler = async (
       throw new Error('SecretString is empty in Secrets Manager response');
     }
 
-    const parsedSecret = JSON.parse(secretResult.SecretString) as { token?: string };
-    const token = parsedSecret.token;
+    const parsedSecret = JSON.parse(secretResult.SecretString) as {
+      heartland?: { token?: string };
+    };
+    const token = parsedSecret.heartland?.token;
     if (!token) {
-      throw new Error('Secret JSON does not contain a "token" field');
+      throw new Error('Operational secret JSON does not contain heartland.token');
     }
     console.log(`Using Bearer token ${token}`)
 

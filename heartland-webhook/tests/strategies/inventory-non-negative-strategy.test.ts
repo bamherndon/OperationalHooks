@@ -34,6 +34,9 @@ describe('InventoryNonNegativeStrategy', () => {
           }
           return Promise.resolve(resp);
         }),
+      getInventoryItem: jest.fn(),
+      updateInventoryItem: jest.fn(),
+      updateInventoryItemImage: jest.fn(),
     };
   };
 
@@ -274,6 +277,9 @@ describe('InventoryNonNegativeStrategy', () => {
     const mockClient: HeartlandApiClient = {
       getTicketLines: jest.fn().mockRejectedValue(new Error('boom')),
       getInventoryValues: jest.fn(),
+      getInventoryItem: jest.fn(),
+      updateInventoryItem: jest.fn(),
+      updateInventoryItemImage: jest.fn(),
     };
 
     const strategy = new InventoryNonNegativeStrategy(
@@ -300,6 +306,9 @@ describe('InventoryNonNegativeStrategy', () => {
     const mockClient: HeartlandApiClient = {
       getTicketLines: jest.fn().mockResolvedValue(lines),
       getInventoryValues: jest.fn().mockRejectedValue(new Error('boom')),
+      getInventoryItem: jest.fn(),
+      updateInventoryItem: jest.fn(),
+      updateInventoryItemImage: jest.fn(),
     };
 
     const strategy = new InventoryNonNegativeStrategy(

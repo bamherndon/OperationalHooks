@@ -3,6 +3,14 @@ import {
   APIGatewayProxyResultV2,
 } from 'aws-lambda';
 import { HeartlandItemCreatedPayload } from '../../model';
+import {
+  DefaultBrickLinkClient,
+  DefaultHeartlandApiClient,
+} from '../../clients';
+import {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} from '@aws-sdk/client-secrets-manager';
 
 /**
  * Lambda handler for item_created webhook events.
@@ -45,10 +53,84 @@ export const handler = async (
     };
   }
 
+  const payload = parsed.value;
+
   console.log(
     'Parsed Heartland item_created payload:',
-    JSON.stringify(parsed.value, null, 2)
+    JSON.stringify(payload, null, 2)
   );
+
+  const baseUrl = process.env.HEARTLAND_API_BASE_URL;
+  const operationalSecretArn = process.env.OPERATIONAL_SECRET_ARN;
+
+  if (!baseUrl || !operationalSecretArn) {
+    console.warn(
+      'Skipping item enrichment: missing HEARTLAND_API_BASE_URL or OPERATIONAL_SECRET_ARN'
+    );
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'ok' }),
+    };
+  }
+
+  if (typeof payload.id !== 'number') {
+    console.warn('Skipping item enrichment: payload is missing numeric id');
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'ok' }),
+    };
+  }
+
+  const bricklinkId = payload.custom?.bricklinkId;
+  if (!bricklinkId) {
+    console.warn('Skipping item enrichment: missing bricklinkId');
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'ok' }),
+    };
+  }
+
+  try {
+    const { heartlandToken, bricklinkCreds } =
+      await getOperationalSecrets(operationalSecretArn);
+
+    const heartlandClient = new DefaultHeartlandApiClient(
+      baseUrl,
+      heartlandToken
+    );
+    const bricklinkClient = new DefaultBrickLinkClient(
+      bricklinkCreds.consumerKey,
+      bricklinkCreds.consumerSecret,
+      bricklinkCreds.tokenValue,
+      bricklinkCreds.tokenSecret
+    );
+
+    const bricklinkItem = await bricklinkClient.getItem('SET', bricklinkId);
+    const imageUrl =
+      (bricklinkItem as { image_url?: string }).image_url ??
+      bricklinkItem.item?.image_url;
+
+    if (imageUrl) {
+      await heartlandClient.updateInventoryItemImage(payload.id, imageUrl);
+    } else {
+      console.warn(
+        'BrickLink item did not include image_url; skipping image update'
+      );
+    }
+
+    const bamCategory = payload.custom?.bamCategory;
+    const category = payload.custom?.category;
+    const tags = ['add', bamCategory, category].filter(Boolean).join(', ');
+
+    await heartlandClient.updateInventoryItem(payload.id, {
+      custom: { tags },
+    });
+  } catch (err) {
+    console.error('Error processing item_created enrichment:', err);
+  }
 
   return {
     statusCode: 200,
@@ -56,6 +138,81 @@ export const handler = async (
     body: JSON.stringify({ status: 'ok' }),
   };
 };
+
+const secretsClient = new SecretsManagerClient({});
+let cachedHeartlandToken: string | null = null;
+let cachedBricklinkCreds:
+  | {
+      consumerKey: string;
+      consumerSecret: string;
+      tokenValue: string;
+      tokenSecret: string;
+    }
+  | null = null;
+
+async function getOperationalSecrets(secretArn: string): Promise<{
+  heartlandToken: string;
+  bricklinkCreds: {
+    consumerKey: string;
+    consumerSecret: string;
+    tokenValue: string;
+    tokenSecret: string;
+  };
+}> {
+  if (cachedHeartlandToken && cachedBricklinkCreds) {
+    return {
+      heartlandToken: cachedHeartlandToken,
+      bricklinkCreds: cachedBricklinkCreds,
+    };
+  }
+
+  const result = await secretsClient.send(
+    new GetSecretValueCommand({ SecretId: secretArn })
+  );
+
+  if (!result.SecretString) {
+    throw new Error('SecretString is empty in Secrets Manager response');
+  }
+
+  const parsed = JSON.parse(result.SecretString) as {
+    heartland?: { token?: string };
+    bricklink?: {
+      consumerKey?: string;
+      consumerSecret?: string;
+      tokenValue?: string;
+      tokenSecret?: string;
+    };
+  };
+
+  const token = parsed.heartland?.token;
+  if (!token) {
+    throw new Error('Operational secret JSON does not contain heartland.token');
+  }
+
+  const consumerKey = parsed.bricklink?.consumerKey;
+  const consumerSecret = parsed.bricklink?.consumerSecret;
+  const tokenValue = parsed.bricklink?.tokenValue;
+  const tokenSecret = parsed.bricklink?.tokenSecret;
+
+  if (!consumerKey || !consumerSecret || !tokenValue || !tokenSecret) {
+    throw new Error(
+      'Operational secret JSON must include bricklink.consumerKey, bricklink.consumerSecret, bricklink.tokenValue, bricklink.tokenSecret'
+    );
+  }
+
+  cachedHeartlandToken = token;
+  cachedBricklinkCreds = {
+    consumerKey,
+    consumerSecret,
+    tokenValue,
+    tokenSecret,
+  };
+
+  return {
+    heartlandToken: token,
+    bricklinkCreds: cachedBricklinkCreds,
+  };
+}
 
 type ParseResult =
   | { ok: true; value: HeartlandItemCreatedPayload }

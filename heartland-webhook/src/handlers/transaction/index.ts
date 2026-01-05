@@ -97,9 +97,9 @@ async function getHeartlandApiTokenFromSecret(): Promise<string> {
     return cachedHeartlandToken;
   }
 
-  const secretArn = process.env.HEARTLAND_SECRET_ARN;
+  const secretArn = process.env.OPERATIONAL_SECRET_ARN;
   if (!secretArn) {
-    throw new Error('HEARTLAND_SECRET_ARN environment variable is not set');
+    throw new Error('OPERATIONAL_SECRET_ARN environment variable is not set');
   }
 
   const result = await secretsClient.send(
@@ -110,12 +110,13 @@ async function getHeartlandApiTokenFromSecret(): Promise<string> {
     throw new Error('SecretString is empty in Secrets Manager response');
   }
 
-  const parsed: { token?: string } = JSON.parse(result.SecretString) as { token?: string };
-  
+  const parsed = JSON.parse(result.SecretString) as {
+    heartland?: { token?: string };
+  };
 
-  const token = parsed.token;
+  const token = parsed.heartland?.token;
   if (!token) {
-    throw new Error('Heartland secret JSON does not contain a "token" field');
+    throw new Error('Operational secret JSON does not contain heartland.token');
   }
 
   cachedHeartlandToken = token;
@@ -141,11 +142,11 @@ async function buildDefaultCompletionStrategies(): Promise<TransactionCompletion
   ];
 
   const baseUrl = process.env.HEARTLAND_API_BASE_URL;
-  const secretArn = process.env.HEARTLAND_SECRET_ARN;
+  const secretArn = process.env.OPERATIONAL_SECRET_ARN;
 
   if (!baseUrl || !secretArn) {
     console.warn(
-      '[inventory-non-negative] Not added: missing HEARTLAND_API_BASE_URL or HEARTLAND_SECRET_ARN'
+      '[inventory-non-negative] Not added: missing HEARTLAND_API_BASE_URL or OPERATIONAL_SECRET_ARN'
     );
     cachedStrategies = strategies;
     return strategies;

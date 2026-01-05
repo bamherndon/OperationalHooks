@@ -57,3 +57,33 @@ OperationalHooks/
       operational-hooks-stack.ts  # Main stack definition
     cdk.json
     package.json
+
+---
+
+## Secrets and Configuration
+
+### OperationalSecrets JSON
+
+The Lambdas read a single Secrets Manager secret named `OperationalSecrets`
+(configurable via the CDK parameter `OperationalSecretsArn`).
+
+Expected JSON structure:
+
+```json
+{
+  "heartland": {
+    "token": "string"
+  },
+  "bricklink": {
+    "consumerKey": "string",
+    "consumerSecret": "string",
+    "tokenValue": "string",
+    "tokenSecret": "string"
+  }
+}
+```
+
+Environment variables used by the Lambdas:
+
+- `HEARTLAND_API_BASE_URL`
+- `OPERATIONAL_SECRET_ARN`

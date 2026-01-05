@@ -1,5 +1,6 @@
 import * as https from 'https';
 import * as crypto from 'crypto';
+import { HeartlandItemCustomFields } from './model';
 
 interface PaginatedResponse<T> {
   total: number;
@@ -40,9 +41,27 @@ export interface InventoryValueRow {
 }
 export type InventoryValuesResponse = PaginatedResponse<InventoryValueRow>;
 
+export interface InventoryItem {
+  id: number;
+  description?: string;
+  long_description?: string;
+  cost?: number | null;
+  price?: number | null;
+  public_id?: string;
+  default_lookup_id?: number | null;
+  custom?: HeartlandItemCustomFields | null;
+  [key: string]: unknown;
+}
+
 export interface HeartlandApiClient {
   getTicketLines(ticketId: number): Promise<TicketLinesResponse>;
   getInventoryValues(itemId: number): Promise<InventoryValuesResponse>;
+  getInventoryItem(itemId: number): Promise<InventoryItem>;
+  updateInventoryItem(
+    itemId: number,
+    updates: Partial<InventoryItem>
+  ): Promise<InventoryItem>;
+  updateInventoryItemImage(itemId: number, imageUrl: string): Promise<unknown>;
 }
 
 /**
@@ -70,6 +89,31 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
 
     const url = buildHeartlandUrl(this.baseUrl, path);
     return httpGetJson<InventoryValuesResponse>(url, this.token);
+  }
+
+  async getInventoryItem(itemId: number): Promise<InventoryItem> {
+    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpGetJson<InventoryItem>(url, this.token);
+  }
+
+  async updateInventoryItem(
+    itemId: number,
+    updates: Partial<InventoryItem>
+  ): Promise<InventoryItem> {
+    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpPutJson<InventoryItem>(url, this.token, updates);
+  }
+
+  async updateInventoryItemImage(
+    itemId: number,
+    imageUrl: string
+  ): Promise<unknown> {
+    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}/images`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    const payload = { source: 'url', url: imageUrl };
+    return httpPostJson<unknown>(url, this.token, payload);
   }
 }
 
@@ -246,6 +290,112 @@ export function httpGetJson<T>(url: string, token: string): Promise<T> {
     req.on('error', (err) => {
       reject(err);
     });
+  });
+}
+
+export function httpPutJson<T>(
+  url: string,
+  token: string,
+  payload: unknown
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const body = JSON.stringify(payload ?? {});
+    const req = https.request(
+      url,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body).toString(),
+        },
+      },
+      (res) => {
+        if (!res) {
+          reject(new Error('No response from Heartland API'));
+          return;
+        }
+
+        let data = '';
+        res.on('data', (chunk: Buffer | string) => {
+          data += chunk.toString();
+        });
+        res.on('end', () => {
+          const statusCode = res.statusCode ?? 0;
+          if (statusCode >= 200 && statusCode < 300) {
+            try {
+              const parsed = data ? JSON.parse(data) : {};
+              resolve(parsed as T);
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(
+              new Error(`HTTP ${statusCode} from Heartland API: ${data}`)
+            );
+          }
+        });
+      }
+    );
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+export function httpPostJson<T>(
+  url: string,
+  token: string,
+  payload: unknown
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const body = JSON.stringify(payload ?? {});
+    const req = https.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body).toString(),
+        },
+      },
+      (res) => {
+        if (!res) {
+          reject(new Error('No response from Heartland API'));
+          return;
+        }
+
+        let data = '';
+        res.on('data', (chunk: Buffer | string) => {
+          data += chunk.toString();
+        });
+        res.on('end', () => {
+          const statusCode = res.statusCode ?? 0;
+          if (statusCode >= 200 && statusCode < 300) {
+            try {
+              const parsed = data ? JSON.parse(data) : {};
+              resolve(parsed as T);
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(
+              new Error(`HTTP ${statusCode} from Heartland API: ${data}`)
+            );
+          }
+        });
+      }
+    );
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+    req.write(body);
+    req.end();
   });
 }
 
