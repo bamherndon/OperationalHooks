@@ -23,7 +23,10 @@ export class InventoryNonNegativeStrategy
   private static readonly EXCLUDED_ITEM_IDS = new Set<number>([
     101996,
     106379,
-    102112
+    102112,
+    104961,
+    104962,
+    103065,
   ]);
 
   constructor(

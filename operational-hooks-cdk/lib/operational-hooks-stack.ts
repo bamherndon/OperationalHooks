@@ -5,6 +5,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import * as path from 'path';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 
 
 export class OperationalHooksStack extends cdk.Stack {
@@ -21,6 +22,28 @@ export class OperationalHooksStack extends cdk.Stack {
       heartlandSecretArn
     );
 
+    const natEip = new ec2.CfnEIP(this, 'LambdaNatEip', {
+      domain: 'vpc',
+    });
+
+    const vpc = new ec2.Vpc(this, 'OperationalHooksVpc', {
+      maxAzs: 2,
+      natGatewayProvider: ec2.NatProvider.gateway({
+        eipAllocationIds: [natEip.attrAllocationId],
+      }),
+      natGateways: 1,
+      subnetConfiguration: [
+        {
+          name: 'public',
+          subnetType: ec2.SubnetType.PUBLIC,
+        },
+        {
+          name: 'private-egress',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        },
+      ],
+    });
+
     /**
      * 1) Webhook handler Lambda
      *    Code comes from ../heartland-webhook/dist (compiled TS).
@@ -33,6 +56,8 @@ export class OperationalHooksStack extends cdk.Stack {
       ),
       description: 'Receives Heartland Retail sales_transaction_completed webhook events',
       timeout: cdk.Duration.seconds(10),
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
         HEARTLAND_SECRET_ARN: heartlandSecretArn,
@@ -65,6 +90,8 @@ export class OperationalHooksStack extends cdk.Stack {
       ),
       description: 'Receives Heartland Retail item_created webhook events',
       timeout: cdk.Duration.seconds(10),
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
     });
 
     const itemCreatedFnUrl = itemCreatedFn.addFunctionUrl({
@@ -100,6 +127,8 @@ export class OperationalHooksStack extends cdk.Stack {
         description:
           'Custom resource Lambda that registers/deregisters webhook with Heartland',
         timeout: cdk.Duration.seconds(30),
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         environment: {
           HEARTLAND_SECRET_ARN: heartlandSecretArn,
         },
