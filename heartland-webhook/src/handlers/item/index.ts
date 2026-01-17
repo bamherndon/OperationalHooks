@@ -6,11 +6,16 @@ import { HeartlandItemCreatedPayload } from '../../model';
 import {
   DefaultBrickLinkClient,
   DefaultHeartlandApiClient,
+  DefaultGroupMeClient,
+  DefaultToyhouseMasterDataClient,
+  ToyhouseMasterDataItem,
+  buildHeartlandUrl,
 } from '../../clients';
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from '@aws-sdk/client-secrets-manager';
+import { S3Client } from '@aws-sdk/client-s3';
 
 /**
  * Lambda handler for item_created webhook events.
@@ -62,6 +67,15 @@ export const handler = async (
 
   const baseUrl = process.env.HEARTLAND_API_BASE_URL;
   const operationalSecretArn = process.env.OPERATIONAL_SECRET_ARN;
+  const toyhouseMasterDataS3Path = process.env.TOYHOUSE_MASTER_DATA_S3_PATH;
+  const groupMeBotId = process.env.GROUPME_BOT_ID;
+
+  console.log('Item handler configuration:', {
+    baseUrl,
+    hasOperationalSecretArn: Boolean(operationalSecretArn),
+    toyhouseMasterDataS3Path,
+    hasGroupMeBotId: Boolean(groupMeBotId),
+  });
 
   if (!baseUrl || !operationalSecretArn) {
     console.warn(
@@ -83,9 +97,74 @@ export const handler = async (
     };
   }
 
+  const subDepartmentFromPayload = payload.custom?.subDepartment;
+  const useToyhouseImage = isNewInBoxSubDepartment(subDepartmentFromPayload);
   const bricklinkId = payload.custom?.bricklinkId;
+  const toyhouseLookupId = bricklinkId
+    ? bricklinkId.split('-')[0]?.trim() || undefined
+    : undefined;
+  let imageFailureReason: string | null = null;
+  let imageUrl: string | undefined;
+  let toyhouseItem: ToyhouseMasterDataItem | null = null;
+
+  console.log('Image selection context:', {
+    subDepartment: subDepartmentFromPayload,
+    useToyhouseImage,
+    bricklinkId,
+    toyhouseLookupId,
+  });
+
   if (!bricklinkId) {
-    console.warn('Skipping item enrichment: missing bricklinkId');
+    imageFailureReason = 'missing bricklinkId';
+  } else if (useToyhouseImage) {
+    if (!toyhouseMasterDataS3Path) {
+      imageFailureReason = 'missing TOYHOUSE_MASTER_DATA_S3_PATH';
+    } else if (!toyhouseLookupId) {
+      imageFailureReason = 'missing Toyhouse lookup id';
+    } else {
+      try {
+        const toyhouseClient = getToyhouseMasterDataClient(
+          toyhouseMasterDataS3Path
+        );
+        toyhouseItem = await toyhouseClient.getItemByNumber(toyhouseLookupId);
+        imageUrl = normalizeImageUrl(getToyhouseImageUrl(toyhouseItem));
+        if (!imageUrl) {
+          imageFailureReason = `Toyhouse image not found for Item # ${toyhouseLookupId}`;
+        }
+      } catch (err) {
+        imageFailureReason = `Toyhouse lookup failed: ${String(err)}`;
+      }
+    }
+  }
+
+  console.log('Toyhouse lookup result:', {
+    hasToyhouseItem: Boolean(toyhouseItem),
+    imageUrl,
+    imageFailureReason,
+  });
+
+  let heartlandClient: DefaultHeartlandApiClient;
+  let bricklinkClient: DefaultBrickLinkClient;
+
+  try {
+    const { heartlandToken, bricklinkCreds } =
+      await getOperationalSecrets(operationalSecretArn);
+
+    heartlandClient = new DefaultHeartlandApiClient(baseUrl, heartlandToken);
+    bricklinkClient = new DefaultBrickLinkClient(
+      bricklinkCreds.consumerKey,
+      bricklinkCreds.consumerSecret,
+      bricklinkCreds.tokenValue,
+      bricklinkCreds.tokenSecret
+    );
+  } catch (err) {
+    console.error('Error loading operational secrets:', err);
+    await sendImageFailureMessage({
+      baseUrl,
+      itemId: payload.id,
+      reason: `Operational secrets error: ${String(err)}`,
+      groupMeBotId,
+    });
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -93,43 +172,67 @@ export const handler = async (
     };
   }
 
-  try {
-    const { heartlandToken, bricklinkCreds } =
-      await getOperationalSecrets(operationalSecretArn);
-
-    const heartlandClient = new DefaultHeartlandApiClient(
-      baseUrl,
-      heartlandToken
-    );
-    const bricklinkClient = new DefaultBrickLinkClient(
-      bricklinkCreds.consumerKey,
-      bricklinkCreds.consumerSecret,
-      bricklinkCreds.tokenValue,
-      bricklinkCreds.tokenSecret
-    );
-
-    const bricklinkItem = await bricklinkClient.getItem('SET', bricklinkId);
-    const imageUrl =
-      (bricklinkItem as { image_url?: string }).image_url ??
-      bricklinkItem.item?.image_url;
-
-    if (imageUrl) {
-      await heartlandClient.updateInventoryItemImage(payload.id, imageUrl);
-    } else {
-      console.warn(
-        'BrickLink item did not include image_url; skipping image update'
-      );
+  if (!imageFailureReason && !useToyhouseImage && bricklinkId) {
+    try {
+      console.log('Fetching BrickLink image:', { bricklinkId });
+      const bricklinkItem = await bricklinkClient.getItem('SET', bricklinkId);
+      const rawImageUrl =
+        (bricklinkItem as { image_url?: string }).image_url ??
+        bricklinkItem.item?.image_url;
+      imageUrl = normalizeImageUrl(rawImageUrl);
+      if (!imageUrl) {
+        imageFailureReason = `BrickLink image not found for Item # ${toyhouseLookupId ?? 'unknown'}`;
+      }
+    } catch (err) {
+      imageFailureReason = `BrickLink lookup failed: ${String(err)}`;
     }
+  }
 
+  console.log('BrickLink lookup result:', {
+    imageUrl,
+    imageFailureReason,
+  });
+
+  if (imageUrl) {
+    try {
+      console.log('Updating Heartland item image:', {
+        itemId: payload.id,
+        imageUrl,
+      });
+      await heartlandClient.updateInventoryItemImage(payload.id, imageUrl);
+    } catch (err) {
+      imageFailureReason = `Heartland image update failed: ${String(err)}`;
+    }
+  } else {
+    console.warn('Skipping image update because imageUrl is empty', {
+      itemId: payload.id,
+      imageFailureReason,
+    });
+  }
+
+  if (imageFailureReason) {
+    await sendImageFailureMessage({
+      baseUrl,
+      itemId: payload.id,
+      reason: imageFailureReason,
+      groupMeBotId,
+    });
+  }
+
+  try {
     const bamCategory = payload.custom?.bamCategory;
     const category = payload.custom?.category;
     const tags = ['add', bamCategory, category].filter(Boolean).join(', ');
 
+    console.log('Updating Heartland item tags:', {
+      itemId: payload.id,
+      tags,
+    });
     await heartlandClient.updateInventoryItem(payload.id, {
       custom: { tags },
     });
   } catch (err) {
-    console.error('Error processing item_created enrichment:', err);
+    console.error('Error updating Heartland item tags:', err);
   }
 
   return {
@@ -138,6 +241,10 @@ export const handler = async (
     body: JSON.stringify({ status: 'ok' }),
   };
 };
+
+const s3Client = new S3Client({});
+let cachedToyhouseClient: DefaultToyhouseMasterDataClient | null = null;
+let cachedToyhousePath: string | null = null;
 
 const secretsClient = new SecretsManagerClient({});
 let cachedHeartlandToken: string | null = null;
@@ -212,6 +319,86 @@ async function getOperationalSecrets(secretArn: string): Promise<{
     heartlandToken: token,
     bricklinkCreds: cachedBricklinkCreds,
   };
+}
+
+function getToyhouseMasterDataClient(
+  s3Path: string
+): DefaultToyhouseMasterDataClient {
+  if (!cachedToyhouseClient || cachedToyhousePath !== s3Path) {
+    cachedToyhouseClient = new DefaultToyhouseMasterDataClient(
+      s3Path,
+      s3Client
+    );
+    cachedToyhousePath = s3Path;
+  }
+
+  return cachedToyhouseClient;
+}
+
+async function sendImageFailureMessage(params: {
+  baseUrl: string;
+  itemId: number;
+  reason: string;
+  groupMeBotId?: string;
+}): Promise<void> {
+  const { baseUrl, itemId, reason, groupMeBotId } = params;
+  if (!groupMeBotId) {
+    console.warn(
+      'GROUPME_BOT_ID not set; cannot send image failure notification'
+    );
+    return;
+  }
+
+  const itemUrl = buildHeartlandUrl(baseUrl, `/#items/edit/${itemId}`);
+  const message = `Cannot set image for ${itemId} (${itemUrl} ) because ${reason}`;
+  const groupMeClient = new DefaultGroupMeClient(groupMeBotId);
+
+  try {
+    await groupMeClient.sendMessage(message);
+  } catch (err) {
+    console.error('Error posting image failure to GroupMe', err);
+  }
+}
+
+function isNewInBoxSubDepartment(subDepartment: string | undefined): boolean {
+  if (!subDepartment) {
+    return false;
+  }
+  return subDepartment.trim().toLowerCase() === 'new in box';
+}
+
+function getToyhouseImageUrl(
+  item: ToyhouseMasterDataItem | null
+): string | undefined {
+  if (!item) {
+    return undefined;
+  }
+
+  const raw = item.raw ?? {};
+  const candidates = [
+    raw['Image 1'],
+    raw['Image 2'],
+    raw['Image 3'],
+  ];
+
+  for (const value of candidates) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeImageUrl(url?: string): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  if (url.startsWith('//')) {
+    return `http:${url}`;
+  }
+  return url;
 }
 
 type ParseResult =

@@ -1,5 +1,7 @@
 import * as https from 'https';
 import * as crypto from 'crypto';
+import { Readable } from 'stream';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { HeartlandItemCustomFields } from './model';
 
 interface PaginatedResponse<T> {
@@ -92,7 +94,7 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
   }
 
   async getInventoryItem(itemId: number): Promise<InventoryItem> {
-    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}`;
+    const path = `/api/items/${encodeURIComponent(String(itemId))}`;
     const url = buildHeartlandUrl(this.baseUrl, path);
     return httpGetJson<InventoryItem>(url, this.token);
   }
@@ -101,7 +103,7 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
     itemId: number,
     updates: Partial<InventoryItem>
   ): Promise<InventoryItem> {
-    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}`;
+    const path = `/api/items/${encodeURIComponent(String(itemId))}`;
     const url = buildHeartlandUrl(this.baseUrl, path);
     return httpPutJson<InventoryItem>(url, this.token, updates);
   }
@@ -110,7 +112,7 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
     itemId: number,
     imageUrl: string
   ): Promise<unknown> {
-    const path = `/api/inventory/items/${encodeURIComponent(String(itemId))}/images`;
+    const path = `/api/items/${encodeURIComponent(String(itemId))}/images`;
     const url = buildHeartlandUrl(this.baseUrl, path);
     const payload = { source: 'url', url: imageUrl };
     return httpPostJson<unknown>(url, this.token, payload);
@@ -241,6 +243,95 @@ export class DefaultBrickLinkClient implements BrickLinkClient {
       .join(', ');
 
     return `OAuth ${header}`;
+  }
+}
+
+export interface ToyhouseMasterDataItem {
+  itemNumber: string;
+  bricklinkId?: string;
+  raw: Record<string, string>;
+}
+
+export interface ToyhouseMasterDataClient {
+  getItemByNumber(itemNumber: string): Promise<ToyhouseMasterDataItem | null>;
+}
+
+const DEFAULT_TOYHOUSE_MASTER_DATA_FILE = 'toyhouse_master_data.csv';
+
+export class DefaultToyhouseMasterDataClient implements ToyhouseMasterDataClient {
+  private cachedItems: Map<string, ToyhouseMasterDataItem> | null = null;
+
+  constructor(
+    private readonly s3Path: string,
+    private readonly s3Client: S3Client
+  ) {}
+
+  async getItemByNumber(itemNumber: string): Promise<ToyhouseMasterDataItem | null> {
+    const normalizedItemNumber = itemNumber.trim();
+    if (!normalizedItemNumber) {
+      return null;
+    }
+
+    const items = await this.loadItems();
+    return items.get(normalizedItemNumber) ?? null;
+  }
+
+  private async loadItems(): Promise<Map<string, ToyhouseMasterDataItem>> {
+    if (this.cachedItems) {
+      return this.cachedItems;
+    }
+
+    const { bucket, key } = parseS3Path(this.s3Path);
+    const result = await this.s3Client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key })
+    );
+
+    const csv = await streamToString(result.Body);
+    const rows = parseCsv(csv);
+    if (rows.length === 0) {
+      this.cachedItems = new Map();
+      return this.cachedItems;
+    }
+
+    const headers = rows[0].map((header) => header.trim());
+    const itemNumberIndex = findHeaderIndex(headers, 'item #');
+    const bricklinkIdIndex = findHeaderIndex(headers, 'bricklink id');
+
+    if (itemNumberIndex === -1) {
+      throw new Error(
+        'toyhouse_master_data.csv is missing required "Item #" header'
+      );
+    }
+
+    const items = new Map<string, ToyhouseMasterDataItem>();
+
+    for (const row of rows.slice(1)) {
+      if (row.length === 0) {
+        continue;
+      }
+
+      const itemNumber = (row[itemNumberIndex] ?? '').trim();
+      if (!itemNumber) {
+        continue;
+      }
+
+      const raw: Record<string, string> = {};
+      for (let i = 0; i < headers.length; i += 1) {
+        raw[headers[i]] = row[i] ?? '';
+      }
+
+      const bricklinkId =
+        bricklinkIdIndex !== -1 ? (row[bricklinkIdIndex] ?? '').trim() : '';
+
+      items.set(itemNumber, {
+        itemNumber,
+        bricklinkId: bricklinkId || undefined,
+        raw,
+      });
+    }
+
+    this.cachedItems = items;
+    return items;
   }
 }
 
@@ -462,6 +553,141 @@ export function buildHeartlandUrl(baseUrl: string, pathWithQuery: string): strin
     ? pathWithQuery
     : `/${pathWithQuery}`;
   return `${trimmedBase}${trimmedPath}`;
+}
+
+function parseS3Path(value: string): { bucket: string; key: string } {
+  const trimmed = value.trim();
+  const withoutScheme = trimmed.startsWith('s3://')
+    ? trimmed.slice('s3://'.length)
+    : trimmed;
+
+  const slashIndex = withoutScheme.indexOf('/');
+  const bucket =
+    slashIndex === -1 ? withoutScheme : withoutScheme.slice(0, slashIndex);
+  let key = slashIndex === -1 ? '' : withoutScheme.slice(slashIndex + 1);
+
+  if (!bucket) {
+    throw new Error(`Invalid S3 path "${value}"`);
+  }
+
+  if (!key || key.endsWith('/')) {
+    const prefix = key.replace(/\/+$/u, '');
+    key = prefix
+      ? `${prefix}/${DEFAULT_TOYHOUSE_MASTER_DATA_FILE}`
+      : DEFAULT_TOYHOUSE_MASTER_DATA_FILE;
+  } else if (!key.toLowerCase().endsWith('.csv')) {
+    key = `${key}/${DEFAULT_TOYHOUSE_MASTER_DATA_FILE}`;
+  }
+
+  return { bucket, key };
+}
+
+async function streamToString(body: unknown): Promise<string> {
+  if (!body) {
+    return '';
+  }
+  if (typeof body === 'string') {
+    return body;
+  }
+  if (body instanceof Uint8Array) {
+    return Buffer.from(body).toString('utf8');
+  }
+  if (body instanceof Readable) {
+    return new Promise<string>((resolve, reject) => {
+      let data = '';
+      body.on('data', (chunk: Buffer | string) => {
+        data += chunk.toString();
+      });
+      body.on('end', () => resolve(data));
+      body.on('error', (err) => reject(err));
+    });
+  }
+
+  const stream = body as { text?: () => Promise<string>; getReader?: () => unknown };
+  if (typeof stream.text === 'function') {
+    return stream.text();
+  }
+  if (typeof stream.getReader === 'function') {
+    const reader = stream.getReader() as {
+      read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+    };
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        chunks.push(value);
+      }
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  }
+
+  return '';
+}
+
+function parseCsv(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csv.length; i += 1) {
+    const char = csv[i];
+
+    if (char === '"') {
+      const nextChar = csv[i + 1];
+      if (inQuotes && nextChar === '"') {
+        field += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      row.push(field);
+      field = '';
+      continue;
+    }
+
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && csv[i + 1] === '\n') {
+        i += 1;
+      }
+      row.push(field);
+      field = '';
+      if (!(row.length === 1 && row[0] === '')) {
+        rows.push(row);
+      }
+      row = [];
+      continue;
+    }
+
+    field += char;
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    if (!(row.length === 1 && row[0] === '')) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function findHeaderIndex(headers: string[], name: string): number {
+  const normalizedName = normalizeHeader(name);
+  return headers.findIndex(
+    (header) => normalizeHeader(header) === normalizedName
+  );
+}
+
+function normalizeHeader(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function buildOauthSignature(

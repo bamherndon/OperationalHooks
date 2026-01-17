@@ -6,28 +6,29 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as path from 'path';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 
 
 export class OperationalHooksStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-     const operationalSecretsArnParam = new cdk.CfnParameter(
+     const operationalSecretsNameParam = new cdk.CfnParameter(
       this,
-      'OperationalSecretsArn',
+      'OperationalSecretsName',
       {
         type: 'String',
-        description: 'Secrets Manager ARN for the OperationalSecrets JSON',
-        default:
-          'arn:aws:secretsmanager:us-east-1:445473841172:secret:OperationalSecrets',
+        description: 'Secrets Manager name for the OperationalSecrets JSON',
+        default: 'OperationalSecrets',
       }
     );
 
     // Represent the existing secret in this stack
-    const operationalSecrets = secretsmanager.Secret.fromSecretCompleteArn(
+    const operationalSecrets = secretsmanager.Secret.fromSecretNameV2(
       this,
       'OperationalSecrets',
-      operationalSecretsArnParam.valueAsString
+      operationalSecretsNameParam.valueAsString
     );
 
     const natEip = new ec2.CfnEIP(this, 'LambdaNatEip', {
@@ -53,7 +54,27 @@ export class OperationalHooksStack extends cdk.Stack {
     });
 
     /**
-     * 1) Webhook handler Lambda
+     * 1) Upload Toyhouse master data CSV to S3.
+     */
+    const toyhouseDataBucket = new s3.Bucket(this, 'ToyhouseMasterDataBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    new s3deploy.BucketDeployment(this, 'ToyhouseMasterDataDeployment', {
+      destinationBucket: toyhouseDataBucket,
+      sources: [s3deploy.Source.asset(path.join(__dirname, '..', 'data'))],
+    });
+
+    new cdk.CfnOutput(this, 'ToyhouseMasterDataBucketName', {
+      value: toyhouseDataBucket.bucketName,
+      description: 'S3 bucket containing toyhouse_master_data.csv',
+    });
+
+    /**
+     * 2) Webhook handler Lambda
      *    Code comes from ../heartland-webhook/dist (compiled TS).
      */
     const transactionWebhookFn = new lambda.Function(this, 'HeartlandTransactionWebhookFn', {
@@ -68,14 +89,16 @@ export class OperationalHooksStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
+        OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
         GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
+        TOYHOUSE_MASTER_DATA_S3_URI: `s3://${toyhouseDataBucket.bucketName}/toyhouse_master_data.csv`,
       },
 
     });
     
     // allow webhook Lambda to read the token secret
     operationalSecrets.grantRead(transactionWebhookFn);
+    toyhouseDataBucket.grantRead(transactionWebhookFn);
 
     // Lambda Function URL (public) so Heartland can POST directly
     const webhookFnUrl = transactionWebhookFn.addFunctionUrl({
@@ -102,9 +125,13 @@ export class OperationalHooksStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
+        OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
+        TOYHOUSE_MASTER_DATA_S3_URI: `s3://${toyhouseDataBucket.bucketName}/toyhouse_master_data.csv`,
+        GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
       },
     });
+    operationalSecrets.grantRead(itemCreatedFn);
+    toyhouseDataBucket.grantRead(itemCreatedFn);
 
     const itemCreatedFnUrl = itemCreatedFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
@@ -120,7 +147,7 @@ export class OperationalHooksStack extends cdk.Stack {
       description: 'Elastic IP address used by the NAT Gateway for Lambda egress',
     });
     /**
-     * 2) Custom resource Lambda that registers/deregisters the webhook.
+     * 3) Custom resource Lambda that registers/deregisters the webhook.
      *    Uses the compiled JS from ../heartland-webhook-custom-resource/dist.
      */
 
@@ -147,7 +174,7 @@ export class OperationalHooksStack extends cdk.Stack {
         vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         environment: {
-          OPERATIONAL_SECRET_ARN: operationalSecretsArnParam.valueAsString,
+          OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
         },
       }
     );

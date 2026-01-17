@@ -1,9 +1,11 @@
 import { EventEmitter } from 'events';
 import * as https from 'https';
+import { Readable } from 'stream';
 import {
   DefaultGroupMeClient,
   DefaultHeartlandApiClient,
   DefaultBrickLinkClient,
+  DefaultToyhouseMasterDataClient,
   buildHeartlandUrl,
   httpGetJson,
   httpPutJson,
@@ -12,6 +14,13 @@ import {
 } from '../../src/clients';
 
 jest.mock('https');
+
+const mockS3Send = jest.fn();
+
+jest.mock('@aws-sdk/client-s3', () => ({
+  S3Client: jest.fn(() => ({ send: mockS3Send })),
+  GetObjectCommand: jest.fn((input) => input),
+}));
 
 const mockedHttps = https as unknown as {
   get: jest.Mock;
@@ -37,6 +46,7 @@ describe('clients', () => {
   beforeEach(() => {
     mockedHttps.get.mockReset();
     mockedHttps.request.mockReset();
+    mockS3Send.mockReset();
   });
 
   it('buildHeartlandUrl trims slashes and joins path', () => {
@@ -582,7 +592,7 @@ describe('clients', () => {
 
     expect(mockedHttps.request).toHaveBeenCalledTimes(1);
     expect(mockedHttps.request.mock.calls[0][0]).toBe(
-      'https://heartland.example/api/inventory/items/123/images'
+      'https://heartland.example/api/items/123/images'
     );
     expect(mockedHttps.request.mock.calls[0][1]).toMatchObject({
       method: 'POST',
@@ -705,5 +715,57 @@ describe('clients', () => {
     await expect(client.getItem('SET', '31119-1')).rejects.toThrow(
       'HTTP 500 from BrickLink API: server down'
     );
+  });
+
+  it('DefaultToyhouseMasterDataClient loads items from S3 and returns matches', async () => {
+    const csv = [
+      'Item #,Bricklink Id,Image 1',
+      '31119,31119-1,https://img.example/31119.jpg',
+      '',
+    ].join('\n');
+
+    mockS3Send.mockResolvedValue({
+      Body: Readable.from([csv]),
+    });
+
+    const client = new DefaultToyhouseMasterDataClient(
+      's3://toyhouse-bucket/exports/toyhouse_master_data.csv',
+      { send: mockS3Send } as unknown as import('@aws-sdk/client-s3').S3Client
+    );
+
+    const item = await client.getItemByNumber('31119');
+
+    expect(mockS3Send).toHaveBeenCalledTimes(1);
+    expect(mockS3Send.mock.calls[0][0]).toEqual({
+      Bucket: 'toyhouse-bucket',
+      Key: 'exports/toyhouse_master_data.csv',
+    });
+    expect(item).toEqual({
+      itemNumber: '31119',
+      bricklinkId: '31119-1',
+      raw: {
+        'Item #': '31119',
+        'Bricklink Id': '31119-1',
+        'Image 1': 'https://img.example/31119.jpg',
+      },
+    });
+  });
+
+  it('DefaultToyhouseMasterDataClient returns null for missing item numbers', async () => {
+    const csv = ['Item #,Bricklink Id', ''].join('\n');
+    mockS3Send.mockResolvedValue({ Body: Readable.from([csv]) });
+
+    const client = new DefaultToyhouseMasterDataClient(
+      's3://toyhouse-bucket/exports/',
+      { send: mockS3Send } as unknown as import('@aws-sdk/client-s3').S3Client
+    );
+
+    const item = await client.getItemByNumber('99999');
+
+    expect(item).toBeNull();
+    expect(mockS3Send).toHaveBeenCalledWith({
+      Bucket: 'toyhouse-bucket',
+      Key: 'exports/toyhouse_master_data.csv',
+    });
   });
 });

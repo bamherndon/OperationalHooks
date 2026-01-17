@@ -12,6 +12,12 @@ const mockHeartlandClient = {
 const mockBricklinkClient = {
   getItem: jest.fn(),
 };
+const mockGroupMeClient = {
+  sendMessage: jest.fn(),
+};
+const mockToyhouseClient = {
+  getItemByNumber: jest.fn(),
+};
 
 jest.mock('@aws-sdk/client-secrets-manager', () => ({
   SecretsManagerClient: jest.fn(() => ({ send: mockSecretsSend })),
@@ -21,6 +27,15 @@ jest.mock('@aws-sdk/client-secrets-manager', () => ({
 jest.mock('../../src/clients', () => ({
   DefaultHeartlandApiClient: jest.fn(() => mockHeartlandClient),
   DefaultBrickLinkClient: jest.fn(() => mockBricklinkClient),
+  DefaultGroupMeClient: jest.fn(() => mockGroupMeClient),
+  DefaultToyhouseMasterDataClient: jest.fn(() => mockToyhouseClient),
+  buildHeartlandUrl: (baseUrl: string, pathWithQuery: string) => {
+    const trimmedBase = baseUrl.replace(/\/+$/, '');
+    const trimmedPath = pathWithQuery.startsWith('/')
+      ? pathWithQuery
+      : `/${pathWithQuery}`;
+    return `${trimmedBase}${trimmedPath}`;
+  },
 }));
 
 const baseEvent: Partial<APIGatewayProxyEventV2> = {
@@ -57,8 +72,12 @@ describe('item_created handler', () => {
     mockHeartlandClient.updateInventoryItemImage.mockReset();
     mockHeartlandClient.updateInventoryItem.mockReset();
     mockBricklinkClient.getItem.mockReset();
+    mockGroupMeClient.sendMessage.mockReset();
+    mockToyhouseClient.getItemByNumber.mockReset();
     delete process.env.HEARTLAND_API_BASE_URL;
     delete process.env.OPERATIONAL_SECRET_ARN;
+    delete process.env.GROUPME_BOT_ID;
+    delete process.env.TOYHOUSE_MASTER_DATA_S3_PATH;
   });
 
   it('returns ok when body is missing', async () => {
@@ -171,11 +190,23 @@ describe('item_created handler', () => {
     warnSpy.mockRestore();
   });
 
-  it('skips enrichment when bricklinkId is missing', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  it('sends GroupMe message when bricklinkId is missing', async () => {
     process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
     process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';
+    process.env.GROUPME_BOT_ID = 'bot-1';
     const handler = await loadHandler();
+
+    mockSecretsSend.mockResolvedValue({
+      SecretString: JSON.stringify({
+        heartland: { token: 'heartland-token' },
+        bricklink: {
+          consumerKey: 'ck',
+          consumerSecret: 'cs',
+          tokenValue: 'tv',
+          tokenSecret: 'ts',
+        },
+      }),
+    });
 
     const body = JSON.stringify({ id: 1, custom: { category: 'Creator' } });
 
@@ -187,12 +218,11 @@ describe('item_created handler', () => {
     );
 
     expect(result.statusCode).toBe(200);
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Skipping item enrichment: missing bricklinkId'
+    expect(mockGroupMeClient.sendMessage).toHaveBeenCalledWith(
+      'Cannot set image for 1 (https://example.heartland.test/#items/edit/1 ) because missing bricklinkId'
     );
     expect(mockBricklinkClient.getItem).not.toHaveBeenCalled();
-
-    warnSpy.mockRestore();
+    expect(mockHeartlandClient.updateInventoryItem).toHaveBeenCalled();
   });
 
   it('skips enrichment when payload id is missing', async () => {
@@ -271,6 +301,54 @@ describe('item_created handler', () => {
     );
   });
 
+  it('uses Toyhouse image only when sub_department is New In Box', async () => {
+    process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
+    process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';
+    process.env.TOYHOUSE_MASTER_DATA_S3_PATH = 's3://bucket/toyhouse_master_data.csv';
+    const handler = await loadHandler();
+
+    mockSecretsSend.mockResolvedValue({
+      SecretString: JSON.stringify({
+        heartland: { token: 'heartland-token' },
+        bricklink: {
+          consumerKey: 'ck',
+          consumerSecret: 'cs',
+          tokenValue: 'tv',
+          tokenSecret: 'ts',
+        },
+      }),
+    });
+    mockToyhouseClient.getItemByNumber.mockResolvedValue({
+      itemNumber: '60240',
+      raw: { 'Image 1': 'https://toyhouse.example/60240.jpg' },
+    });
+
+    const body = JSON.stringify({
+      id: 109531,
+      custom: {
+        bricklink_id: '60240-1',
+        sub_department: 'New In Box',
+        bam_category: 'Pre-Built Set',
+        category: 'Creator',
+      },
+    });
+
+    const result = asStructuredResult(
+      await handler({
+        ...(baseEvent as APIGatewayProxyEventV2),
+        body,
+      })
+    );
+
+    expect(result.statusCode).toBe(200);
+    expect(mockToyhouseClient.getItemByNumber).toHaveBeenCalledWith('60240');
+    expect(mockHeartlandClient.updateInventoryItemImage).toHaveBeenCalledWith(
+      109531,
+      'https://toyhouse.example/60240.jpg'
+    );
+    expect(mockBricklinkClient.getItem).not.toHaveBeenCalled();
+  });
+
   it('uses item.image_url when top-level image_url is missing', async () => {
     process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
     process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';
@@ -314,10 +392,10 @@ describe('item_created handler', () => {
     );
   });
 
-  it('skips image update when BrickLink item has no image_url', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  it('sends GroupMe message when BrickLink item has no image_url', async () => {
     process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
     process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';
+    process.env.GROUPME_BOT_ID = 'bot-1';
     const handler = await loadHandler();
 
     mockSecretsSend.mockResolvedValue({
@@ -354,11 +432,9 @@ describe('item_created handler', () => {
     expect(result.statusCode).toBe(200);
     expect(mockHeartlandClient.updateInventoryItemImage).not.toHaveBeenCalled();
     expect(mockHeartlandClient.updateInventoryItem).toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'BrickLink item did not include image_url; skipping image update'
+    expect(mockGroupMeClient.sendMessage).toHaveBeenCalledWith(
+      'Cannot set image for 109531 (https://example.heartland.test/#items/edit/109531 ) because BrickLink image not found for Item # 31119'
     );
-
-    warnSpy.mockRestore();
   });
 
   it('logs errors when secrets are missing fields', async () => {
