@@ -55,6 +55,10 @@ export interface InventoryItem {
   [key: string]: unknown;
 }
 
+/**
+ * Wrapper interface for calling Heartland API.
+ * Documentation: https://dev.retail.heartland.us/
+ */
 export interface HeartlandApiClient {
   getTicketLines(ticketId: number): Promise<TicketLinesResponse>;
   getInventoryValues(itemId: number): Promise<InventoryValuesResponse>;
@@ -121,6 +125,7 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
 
 /**
  * GroupMe client abstraction.
+ * API documentation: https://groupme-js.github.io/GroupMeCommunityDocs/api/
  */
 export interface GroupMeClient {
   sendMessage(text: string): Promise<void>;
