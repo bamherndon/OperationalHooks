@@ -466,6 +466,50 @@ describe('clients', () => {
     );
   });
 
+  it('DefaultHeartlandApiClient runReport builds reporting URL with query params', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ total: 0, pages: 1, results: [] })
+    );
+    mockedHttps.get.mockImplementation(
+      (
+        url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient(
+      'https://heartland.example',
+      'token-abc'
+    );
+
+    await client.runReport('analyzer', {
+      'metrics[]': ['sum(total)', 'sum(cost)'],
+      'group[]': 'category',
+      per_page: 25,
+    });
+
+    const calledUrl = mockedHttps.get.mock.calls[0][0] as string;
+    const parsed = new URL(calledUrl);
+    expect(parsed.origin + parsed.pathname).toBe(
+      'https://heartland.example/api/reporting/analyzer'
+    );
+    expect(parsed.searchParams.getAll('metrics[]')).toEqual([
+      'sum(total)',
+      'sum(cost)',
+    ]);
+    expect(parsed.searchParams.get('group[]')).toBe('category');
+    expect(parsed.searchParams.get('per_page')).toBe('25');
+    expect(parsed.searchParams.get('request_client_uuid')).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+  });
+
   it('DefaultGroupMeClient posts and resolves on success', async () => {
     const { res, emitBody } = makeMockResponse(202, '');
 
