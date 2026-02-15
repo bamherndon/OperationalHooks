@@ -55,6 +55,12 @@ export interface InventoryItem {
   [key: string]: unknown;
 }
 
+type QueryValue = string | number | boolean;
+export type HeartlandReportQuery = Record<
+  string,
+  QueryValue | QueryValue[] | undefined
+>;
+
 /**
  * Wrapper interface for calling Heartland API.
  * Documentation: https://dev.retail.heartland.us/
@@ -68,6 +74,10 @@ export interface HeartlandApiClient {
     updates: Partial<InventoryItem>
   ): Promise<InventoryItem>;
   updateInventoryItemImage(itemId: number, imageUrl: string): Promise<unknown>;
+  runReport<T = unknown>(
+    reportType: string,
+    query?: HeartlandReportQuery
+  ): Promise<T>;
 }
 
 /**
@@ -120,6 +130,22 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
     const url = buildHeartlandUrl(this.baseUrl, path);
     const payload = { source: 'url', url: imageUrl };
     return httpPostJson<unknown>(url, this.token, payload);
+  }
+
+  async runReport<T = unknown>(
+    reportType: string,
+    query: HeartlandReportQuery = {}
+  ): Promise<T> {
+    const reportPath = `/api/reporting/${encodeURIComponent(reportType)}`;
+    const queryWithClientUuid: HeartlandReportQuery = {
+      ...query,
+      request_client_uuid: crypto.randomUUID(),
+    };
+    const queryString = buildQueryString(queryWithClientUuid);
+    const path = queryString ? `${reportPath}?${queryString}` : reportPath;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    console.log(`Getting report using url ${url}`);
+    return httpGetJson<T>(url, this.token);
   }
 }
 
@@ -558,6 +584,25 @@ export function buildHeartlandUrl(baseUrl: string, pathWithQuery: string): strin
     ? pathWithQuery
     : `/${pathWithQuery}`;
   return `${trimmedBase}${trimmedPath}`;
+}
+
+function buildQueryString(query: HeartlandReportQuery): string {
+  const params: string[] = [];
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const arrayValue of value) {
+        params.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(arrayValue))}`
+        );
+      }
+      continue;
+    }
+    params.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+  }
+  return params.join('&');
 }
 
 function parseS3Path(value: string): { bucket: string; key: string } {

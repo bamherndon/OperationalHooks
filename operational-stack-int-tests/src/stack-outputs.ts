@@ -6,6 +6,7 @@ import {
 export type HandlerUrls = {
   transactionWebhookUrl: string;
   itemCreatedUrl: string;
+  undersoldItemsUrl: string;
 };
 
 const DEFAULT_STACK_NAME = 'OperationalHooksStack';
@@ -28,12 +29,13 @@ export const getHandlerUrls = async (
 
   const transactionWebhookUrl = outputs.WebhookFunctionUrl;
   const itemCreatedUrl = outputs.ItemCreatedFunctionUrl;
+  const undersoldItemsUrl = outputs.UndersoldItemsFunctionUrl;
 
-  if (!transactionWebhookUrl || !itemCreatedUrl) {
+  if (!transactionWebhookUrl || !itemCreatedUrl || !undersoldItemsUrl) {
     throw new Error(
       `Missing handler URLs in stack outputs for ${stackName}`
     );
   }
 
-  return { transactionWebhookUrl, itemCreatedUrl };
+  return { transactionWebhookUrl, itemCreatedUrl, undersoldItemsUrl };
 };

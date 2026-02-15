@@ -16,6 +16,7 @@ describe('PriceAdjustedItemStrategy', () => {
       getInventoryItem: jest.fn(),
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
+      runReport: jest.fn(),
     };
   };
 
@@ -185,6 +186,7 @@ describe('PriceAdjustedItemStrategy', () => {
       getInventoryItem: jest.fn(),
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
+      runReport: jest.fn(),
     };
 
     const strategy = new PriceAdjustedItemStrategy(mockClient);

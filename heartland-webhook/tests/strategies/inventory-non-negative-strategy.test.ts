@@ -37,6 +37,7 @@ describe('InventoryNonNegativeStrategy', () => {
       getInventoryItem: jest.fn(),
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
+      runReport: jest.fn(),
     };
   };
 
@@ -280,6 +281,7 @@ describe('InventoryNonNegativeStrategy', () => {
       getInventoryItem: jest.fn(),
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
+      runReport: jest.fn(),
     };
 
     const strategy = new InventoryNonNegativeStrategy(
@@ -309,6 +311,7 @@ describe('InventoryNonNegativeStrategy', () => {
       getInventoryItem: jest.fn(),
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
+      runReport: jest.fn(),
     };
 
     const strategy = new InventoryNonNegativeStrategy(
