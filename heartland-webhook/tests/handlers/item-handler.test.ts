@@ -301,6 +301,56 @@ describe('item_created handler', () => {
     );
   });
 
+  it('calls BrickLink with MINIFIG type when department is Minifigs', async () => {
+    process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
+    process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';
+    const handler = await loadHandler();
+
+    mockSecretsSend.mockResolvedValue({
+      SecretString: JSON.stringify({
+        heartland: { token: 'heartland-token' },
+        bricklink: {
+          consumerKey: 'ck',
+          consumerSecret: 'cs',
+          tokenValue: 'tv',
+          tokenSecret: 'ts',
+        },
+      }),
+    });
+    mockBricklinkClient.getItem.mockResolvedValue({
+      item: { no: 'sh0371', type: 'MINIFIG' },
+      image_url: 'https://img.example/sh0371.jpg',
+    });
+
+    const body = JSON.stringify({
+      id: 110380,
+      custom: {
+        bricklink_id: 'sh0371',
+        department: 'Minifigs',
+        bam_category: 'Non-LEGO IP Minifig',
+        category: 'Super Heroes',
+      },
+    });
+
+    const result = asStructuredResult(
+      await handler({
+        ...(baseEvent as APIGatewayProxyEventV2),
+        body,
+      })
+    );
+
+    expect(result.statusCode).toBe(200);
+    expect(mockBricklinkClient.getItem).toHaveBeenCalledWith('MINIFIG', 'sh0371');
+    expect(mockHeartlandClient.updateInventoryItemImage).toHaveBeenCalledWith(
+      110380,
+      'https://img.example/sh0371.jpg'
+    );
+    expect(mockHeartlandClient.updateInventoryItem).toHaveBeenCalledWith(
+      110380,
+      { custom: { tags: 'add, Non-LEGO IP Minifig, Super Heroes' } }
+    );
+  });
+
   it('uses Toyhouse image only when sub_department is New In Box', async () => {
     process.env.HEARTLAND_API_BASE_URL = 'https://example.heartland.test';
     process.env.OPERATIONAL_SECRET_ARN = 'arn:test:operational';

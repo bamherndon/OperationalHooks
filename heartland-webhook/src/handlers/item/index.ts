@@ -103,6 +103,9 @@ export const handler = async (
   const toyhouseLookupId = bricklinkId
     ? bricklinkId.split('-')[0]?.trim() || undefined
     : undefined;
+  const bricklinkItemType = departmentToBricklinkItemType(
+    payload.custom?.department
+  );
   let imageFailureReason: string | null = null;
   let imageUrl: string | undefined;
   let toyhouseItem: ToyhouseMasterDataItem | null = null;
@@ -174,8 +177,8 @@ export const handler = async (
 
   if (!imageFailureReason && !useToyhouseImage && bricklinkId) {
     try {
-      console.log('Fetching BrickLink image:', { bricklinkId });
-      const bricklinkItem = await bricklinkClient.getItem('SET', bricklinkId);
+      console.log('Fetching BrickLink image:', { bricklinkId, bricklinkItemType });
+      const bricklinkItem = await bricklinkClient.getItem(bricklinkItemType, bricklinkId);
       const rawImageUrl =
         (bricklinkItem as { image_url?: string }).image_url ??
         bricklinkItem.item?.image_url;
@@ -365,6 +368,13 @@ function isNewInBoxSubDepartment(subDepartment: string | undefined): boolean {
     return false;
   }
   return subDepartment.trim().toLowerCase() === 'new in box';
+}
+
+function departmentToBricklinkItemType(department: string | undefined): string {
+  if (department?.trim().toLowerCase() === 'minifigs') {
+    return 'MINIFIG';
+  }
+  return 'SET';
 }
 
 function getToyhouseImageUrl(

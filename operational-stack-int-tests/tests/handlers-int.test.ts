@@ -191,4 +191,86 @@ describe('Operational Hooks handlers (deployed)', () => {
     const body = await response.json();
     expect(body).toEqual({ status: 'ok' });
   });
+
+  const minifigPayload = {
+    id: 110380,
+    metadata: {},
+    cost: 9.78,
+    price: 25,
+    description: 'sh0371 Hulk - Giant, Magenta Pants, Dark Green Hair',
+    allowFractionalQty: false,
+    publicId: 'sh0371',
+    defaultLookupId: 110380,
+    longDescription: 'sh0371 Hulk - Giant, Magenta Pants, Dark Green Hair',
+    custom: {
+      upc: '',
+      tags: '',
+      theme: 'Super Heroes',
+      series: '',
+      retired: '',
+      category: 'Super Heroes',
+      department: 'Minifigs',
+      launchDate: '',
+      bamCategory: 'Non-LEGO IP Minifig',
+      bricklinkId: 'sh0371',
+      taxCategory: 'Yes',
+      subDepartment: 'Case Fig',
+      retirementDate: '',
+      launch_date: '',
+      bam_category: 'Non-LEGO IP Minifig',
+      bricklink_id: 'sh0371',
+      tax_category: 'Yes',
+      sub_department: 'Case Fig',
+      retirement_date: '',
+      vendor_product_url: '',
+    },
+    active: true,
+    createdAt: '2026-03-02T23:15:42+00:00',
+    updatedAt: '2026-03-02T23:15:42+00:00',
+    financialClassId: null,
+    importBatchId: null,
+    primaryVendorId: 100004,
+    primaryBarcode: 'SR110380',
+    gridId: null,
+    originalPrice: null,
+    sortKey: 6368045,
+    metadataPrivate: null,
+    importSetId: null,
+    createdByUserId: 100009,
+    promptForPrice: false,
+    promptForDescription: false,
+    useDynamicMargin: false,
+    dynamicMargin: null,
+    updatedByUserId: 100009,
+    weight: null,
+    width: null,
+    height: null,
+    depth: null,
+    trackInventory: true,
+    addOnForItemsMatchingFilter: false,
+    addOnItemFilter: null,
+    uuid: '6b006bce-9b9c-48f6-83a4-d90cb2e57609',
+    primaryImageId: null,
+    defaultPriceListId: 1,
+    type: 'regular',
+    availableOnline: false,
+    hasImages: null,
+    weightUnit: null,
+    widthUnit: null,
+    heightUnit: null,
+    depthUnit: null,
+    productType: 'simple',
+  };
+
+  test('item created handler accepts minifig payload', async () => {
+    const response = await fetch(itemCreatedUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(minifigPayload),
+    });
+
+    expect(response.ok).toBe(true);
+    const body = await response.json();
+    expect(body).toEqual({ status: 'ok' });
+  });
 });
