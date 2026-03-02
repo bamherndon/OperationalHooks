@@ -5,7 +5,6 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import * as path from 'path';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -16,44 +15,12 @@ export class OperationalHooksStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-     const operationalSecretsNameParam = new cdk.CfnParameter(
-      this,
-      'OperationalSecretsName',
-      {
-        type: 'String',
-        description: 'Secrets Manager name for the OperationalSecrets JSON',
-        default: 'OperationalSecrets',
-      }
-    );
-
     // Represent the existing secret in this stack
-    const operationalSecrets = secretsmanager.Secret.fromSecretNameV2(
+    const operationalSecrets = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       'OperationalSecrets',
-      operationalSecretsNameParam.valueAsString
+      'arn:aws:secretsmanager:us-east-1:445473841172:secret:OperationalSecrets/free-7mCBwe'
     );
-
-    const natEip = new ec2.CfnEIP(this, 'LambdaNatEip', {
-      domain: 'vpc',
-    });
-
-    const vpc = new ec2.Vpc(this, 'OperationalHooksVpc', {
-      maxAzs: 2,
-      natGatewayProvider: ec2.NatProvider.gateway({
-        eipAllocationIds: [natEip.attrAllocationId],
-      }),
-      natGateways: 1,
-      subnetConfiguration: [
-        {
-          name: 'public',
-          subnetType: ec2.SubnetType.PUBLIC,
-        },
-        {
-          name: 'private-egress',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
-      ],
-    });
 
     /**
      * 1) Upload Toyhouse master data CSV to S3.
@@ -87,11 +54,9 @@ export class OperationalHooksStack extends cdk.Stack {
       ),
       description: 'Receives Heartland Retail sales_transaction_completed webhook events',
       timeout: cdk.Duration.seconds(10),
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
+        OPERATIONAL_SECRET_ARN: operationalSecrets.secretArn,
         GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
         TOYHOUSE_MASTER_DATA_S3_URI: `s3://${toyhouseDataBucket.bucketName}/toyhouse_master_data.csv`,
       },
@@ -123,11 +88,9 @@ export class OperationalHooksStack extends cdk.Stack {
       ),
       description: 'Receives Heartland Retail item_created webhook events',
       timeout: cdk.Duration.seconds(10),
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
+        OPERATIONAL_SECRET_ARN: operationalSecrets.secretArn,
         TOYHOUSE_MASTER_DATA_S3_URI: `s3://${toyhouseDataBucket.bucketName}/toyhouse_master_data.csv`,
         GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
       },
@@ -152,11 +115,9 @@ export class OperationalHooksStack extends cdk.Stack {
       ),
       description: 'Runs daily undersold-items Heartland report and logs results',
       timeout: cdk.Duration.seconds(30),
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       environment: {
         HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
-        OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
+        OPERATIONAL_SECRET_ARN: operationalSecrets.secretArn,
         GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
         UNDERSOLD_REPORTS_S3_BUCKET: toyhouseDataBucket.bucketName,
       },
@@ -182,10 +143,6 @@ export class OperationalHooksStack extends cdk.Stack {
       description: 'Public Lambda Function URL for UndersoldItems scheduled handler',
     });
 
-    new cdk.CfnOutput(this, 'LambdaNatEipAddress', {
-      value: natEip.ref,
-      description: 'Elastic IP address used by the NAT Gateway for Lambda egress',
-    });
     /**
      * 3) Custom resource Lambda that registers/deregisters the webhook.
      *    Uses the compiled JS from ../heartland-webhook-custom-resource/dist.
@@ -211,10 +168,8 @@ export class OperationalHooksStack extends cdk.Stack {
         description:
           'Custom resource Lambda that registers/deregisters webhook with Heartland',
         timeout: cdk.Duration.seconds(30),
-        vpc,
-        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         environment: {
-          OPERATIONAL_SECRET_ARN: operationalSecretsNameParam.valueAsString,
+          OPERATIONAL_SECRET_ARN: operationalSecrets.secretArn,
         },
       }
     );

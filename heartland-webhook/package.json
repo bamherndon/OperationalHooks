@@ -4,8 +4,8 @@
   "description": "AWS Lambda handler for Heartland Retail webhooks",
   "main": "dist/handlers/transaction/index.js",
   "scripts": {
-    "lint": "eslint . --ext .ts,.js",
-    "lint:fix": "eslint . --ext .ts,.js --fix",
+    "lint": "npx eslint . --ext .ts,.js",
+    "lint:fix": "npx eslint . --ext .ts,.js --fix",
     "build": "npm run lint && npm test && tsc",
     "zip": "npm run build && node scripts/make-zip.js",
     "test": "jest --coverage",

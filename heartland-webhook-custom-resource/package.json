@@ -6,8 +6,8 @@
   "scripts": {
     "build": "npm run lint && tsc",
     "zip": "npm run build && node scripts/make-zip.js",
-    "lint": "eslint . --ext .ts,.js",
-    "lint:fix": "eslint . --ext .ts,.js --fix"
+    "lint": "npx eslint . --ext .ts,.js",
+    "lint:fix": "npx eslint . --ext .ts,.js --fix"
   },
   "license": "MIT",
   "dependencies": {},
