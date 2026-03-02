@@ -2,78 +2,72 @@
 
 Automation and operational webhooks for Bricks & Minifigs Herndon, built on AWS Lambda, TypeScript, and AWS CDK.
 
-This repo currently contains:
+## Handlers
 
-- **`heartland-webhook/`**  
-  Lambda that receives `sales_transaction_completed` webhooks from Heartland Retail via a Lambda Function URL.  
-  It runs a set of “transaction checks”, including an inventory check that calls Heartland’s API and posts alerts to GroupMe when inventory goes negative.
+### `heartland-webhook/src/handlers/transaction/` — Sales transaction webhook
+Receives `sales_transaction_completed` webhooks from Heartland Retail via a Lambda Function URL. Runs a set of `TransactionCompletionStrategy` checks on each sale/return and posts alerts to GroupMe on failures.
 
-- **`heartland-webhook-custom-resource/`**  
-  Lambda that acts as a CloudFormation custom resource.  
-  On stack create/delete, it registers/deregisters the webhook with Heartland Retail using the Heartland API and a shared API token from Secrets Manager.
+Strategies:
+- `InventoryNonNegativeStrategy` — alerts if any item's inventory goes negative after the sale
+- `PriceAdjustedItemStrategy` — detects price-adjusted line items
+- `HighDiscountTicketStrategy` — detects tickets with high overall discount percentages
 
-- **`operational-hooks-cdk/`**  
-  AWS CDK app that:
-  - Builds/uses the Lambda bundles from the two subprojects.
-  - Deploys the Lambdas.
-  - Creates a Lambda Function URL for the Heartland webhook.
-  - Sets environment variables and permissions (Secrets Manager, etc.).
+### `heartland-webhook/src/handlers/item/` — Item created webhook
+Receives `item_created` webhooks from Heartland Retail via a Lambda Function URL. For each new item:
+
+1. **Fetches an image** from BrickLink or Toyhouse and uploads it to the item in Heartland.
+   - Image source is determined by `subDepartment`: `"New In Box"` → Toyhouse master data CSV (on S3); all others → BrickLink.
+   - BrickLink item type is derived from `department`: `"Minifigs"` → `MINIFIG`; all others → `SET`.
+   - Posts a GroupMe alert if an image cannot be found or applied.
+2. **Sets tags** on the item: `"add, <bamCategory>, <category>"`.
+
+### `heartland-webhook/src/handlers/undersold-items/` — Stale inventory report
+Triggered daily at 03:00 UTC by EventBridge. Queries Heartland for items not sold in 60 days, builds an Excel workbook, uploads it to S3, and sends a presigned download link to GroupMe.
 
 ---
 
 ## Project Layout
 
-```text
+```
 OperationalHooks/
-  heartland-webhook/
+  heartland-webhook/              # Main Lambda package (all three handlers)
     src/
-      index.ts                 # Lambda handler + transaction strategies
-      model.ts                 # Shared types/interfaces
-      strategies/
-        inventory-non-negative-strategy.ts  # Heartland + GroupMe integration
+      handlers/
+        transaction/index.ts      # Sales transaction webhook handler
+        item/index.ts             # Item created webhook handler
+        undersold-items/index.ts  # Stale inventory report handler
+      strategies/                 # TransactionCompletionStrategy implementations
+      clients.ts                  # HeartlandApiClient, BrickLinkClient, GroupMeClient, ToyhouseMasterDataClient
+      model.ts                    # Shared types and interfaces
     tests/
-      inventory-non-negative-strategy.test.ts
-    dist/                      # Compiled JS (tsc output)
-    scripts/
-      make-zip.js              # Creates lambda.zip from dist/
     package.json
     tsconfig.json
-    eslint.config.cjs
 
-  heartland-webhook-custom-resource/
-    src/
-      index.ts                 # Custom resource Lambda logic
-    dist/
-    scripts/
-      make-zip.js
+  heartland-webhook-custom-resource/   # CloudFormation custom resource Lambda
+    src/index.ts                       # Registers/deregisters webhooks with Heartland on stack create/delete
     package.json
     tsconfig.json
-    eslint.config.cjs
 
-  operational-hooks-cdk/
-    bin/
-      operational-hooks-cdk.ts # CDK app entry
-    lib/
-      operational-hooks-stack.ts  # Main stack definition
-    cdk.json
+  operational-hooks-cdk/          # AWS CDK app
+    bin/operational-hooks-cdk.ts  # CDK app entry point
+    lib/operational-hooks-stack.ts
     package.json
+
+  operational-stack-int-tests/    # Integration tests against the deployed stack
+    tests/handlers-int.test.ts
+    tests/undersold-items-int.test.ts
+    package.json
+```
 
 ---
 
 ## Secrets and Configuration
 
-### OperationalSecrets JSON
-
-The Lambdas read a single Secrets Manager secret named `OperationalSecrets`
-(configurable via the CDK parameter `OperationalSecretsArn`).
-
-Expected JSON structure:
+All secrets live in a single Secrets Manager secret named `OperationalSecrets` (configurable via CDK parameter `OperationalSecretsName`):
 
 ```json
 {
-  "heartland": {
-    "token": "string"
-  },
+  "heartland": { "token": "string" },
   "bricklink": {
     "consumerKey": "string",
     "consumerSecret": "string",
@@ -83,7 +77,18 @@ Expected JSON structure:
 }
 ```
 
-Environment variables used by the Lambdas:
+Lambda environment variables:
 
-- `HEARTLAND_API_BASE_URL`
-- `OPERATIONAL_SECRET_ARN`
+| Variable | Used by | Description |
+|---|---|---|
+| `HEARTLAND_API_BASE_URL` | all | e.g. `https://bamherndon.retail.heartland.us` |
+| `OPERATIONAL_SECRET_ARN` | all | Secrets Manager secret name/ARN |
+| `GROUPME_BOT_ID` | transaction, item, undersold-items | GroupMe bot ID for alerts |
+| `TOYHOUSE_MASTER_DATA_S3_PATH` | item | S3 path to `toyhouse_master_data.csv` |
+| `UNDERSOLD_REPORTS_S3_BUCKET` | undersold-items | S3 bucket for generated Excel reports |
+
+---
+
+## Development
+
+See [CLAUDE.md](./CLAUDE.md) for build commands, architecture details, and development guidance.

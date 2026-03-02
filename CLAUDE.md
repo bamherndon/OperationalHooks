@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation upkeep
+
+Before committing and pushing, always update `CLAUDE.md` and `README.md` to reflect any changes made — new handlers, changed behavior, new environment variables, updated architecture, etc. Both files should accurately describe the current state of the codebase at all times.
+
 ## Prerequisites
 
 - Node.js v20
@@ -52,7 +56,7 @@ This is a monorepo with three TypeScript subprojects, each with its own `package
 | Handler | Trigger | Purpose |
 |---|---|---|
 | `transaction/index.ts` | Heartland `sales_transaction_completed` webhook (Lambda Function URL) | Runs a set of `TransactionCompletionStrategy` checks on each sale/return; alerts GroupMe on failures |
-| `item/index.ts` | Heartland `item_created` webhook (Lambda Function URL) | Fetches an image from BrickLink or Toyhouse master data CSV and updates the new item in Heartland; sets tags |
+| `item/index.ts` | Heartland `item_created` webhook (Lambda Function URL) | Fetches an image from BrickLink or Toyhouse master data CSV and updates the new item in Heartland; sets tags. BrickLink item type is derived from `department`: `"Minifigs"` → `MINIFIG`, all others → `SET`. Sub-department `"New In Box"` uses Toyhouse instead of BrickLink. |
 | `undersold-items/index.ts` | EventBridge schedule (daily 03:00 UTC) | Queries Heartland analyzer report for stale inventory (not sold in 60 days), builds an Excel workbook, uploads to S3, sends a presigned link to GroupMe |
 
 ### Strategy pattern for transaction checks
