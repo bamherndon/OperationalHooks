@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Integration tests for deployed Operational Hooks handlers",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "build": "tsc -p tsconfig.json"
