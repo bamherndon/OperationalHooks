@@ -55,6 +55,46 @@ export interface InventoryItem {
   [key: string]: unknown;
 }
 
+export type PurchaseOrderStatus = 'pending' | 'open' | 'closed' | 'canceled';
+
+export interface PurchaseOrder {
+  id: number;
+  status?: string;
+  receive_at_location_id?: number | null;
+  created_at?: string;
+  updated_at?: string;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
+  [key: string]: unknown;
+}
+
+export type PurchaseOrdersResponse = PaginatedResponse<PurchaseOrder>;
+
+export interface PurchaseOrderLine {
+  id: number;
+  purchase_order_id?: number;
+  item_id?: number;
+  qty?: number;
+  unit_cost?: number | null;
+  [key: string]: unknown;
+}
+
+export type PurchaseOrderLinesResponse = PaginatedResponse<PurchaseOrderLine>;
+
+export interface Receipt {
+  id: number;
+  purchase_order_id?: number | null;
+  location_id?: number | null;
+  [key: string]: unknown;
+}
+
+export interface ReceiptLine {
+  item_id: number;
+  qty: number;
+  receipt_id?: number;
+  unit_cost?: number | null;
+}
+
 type QueryValue = string | number | boolean;
 export type HeartlandReportQuery = Record<
   string,
@@ -78,6 +118,19 @@ export interface HeartlandApiClient {
     reportType: string,
     query?: HeartlandReportQuery
   ): Promise<T>;
+  listPurchaseOrders(
+    status: PurchaseOrderStatus,
+    page?: number
+  ): Promise<PurchaseOrdersResponse>;
+  getPurchaseOrderLines(purchaseOrderId: number): Promise<PurchaseOrderLinesResponse>;
+  createReceipt(purchaseOrderId: number, locationId: number): Promise<void>;
+  getReceiptByOrderId(orderId: number): Promise<Receipt>;
+  addReceiptLine(receiptId: number, line: ReceiptLine): Promise<unknown>;
+  createReceiptFromPurchaseOrder(
+    purchaseOrderId: number,
+    locationId: number
+  ): Promise<Receipt>;
+  completeReceipt(receiptId: number): Promise<Receipt>;
 }
 
 /**
@@ -130,6 +183,95 @@ export class DefaultHeartlandApiClient implements HeartlandApiClient {
     const url = buildHeartlandUrl(this.baseUrl, path);
     const payload = { source: 'url', url: imageUrl };
     return httpPostJson<unknown>(url, this.token, payload);
+  }
+
+  async listPurchaseOrders(
+    status: PurchaseOrderStatus,
+    page = 1
+  ): Promise<PurchaseOrdersResponse> {
+    const path =
+      `/api/purchasing/orders` +
+      `?status=${encodeURIComponent(status)}` +
+      `&page=${encodeURIComponent(String(page))}`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpGetJson<PurchaseOrdersResponse>(url, this.token);
+  }
+
+  async getPurchaseOrderLines(
+    purchaseOrderId: number
+  ): Promise<PurchaseOrderLinesResponse> {
+    const path =
+      `/api/purchasing/orders/${encodeURIComponent(String(purchaseOrderId))}/lines` +
+      `?per_page=500`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpGetJson<PurchaseOrderLinesResponse>(url, this.token);
+  }
+
+  async createReceipt(purchaseOrderId: number, locationId: number): Promise<void> {
+    const url = buildHeartlandUrl(this.baseUrl, `/api/purchasing/receipts`);
+    await httpPostJson<unknown>(url, this.token, {
+      order_id: purchaseOrderId,
+      receive_at_location_id: locationId,
+    });
+  }
+
+  async getReceiptByOrderId(orderId: number): Promise<Receipt> {
+    const url = buildHeartlandUrl(
+      this.baseUrl,
+      `/api/purchasing/receipts?order_id=${encodeURIComponent(String(orderId))}&status=pending`
+    );
+    const response = await httpGetJson<PaginatedResponse<Receipt>>(url, this.token);
+    const receipt = response.results[0];
+    if (!receipt) {
+      throw new Error(`No pending receipt found for order_id ${orderId}`);
+    }
+    return receipt;
+  }
+
+  async addReceiptLine(receiptId: number, line: ReceiptLine): Promise<unknown> {
+    const path = `/api/purchasing/receipts/${encodeURIComponent(String(receiptId))}/lines`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpPostJson<unknown>(url, this.token, line);
+  }
+
+  async createReceiptFromPurchaseOrder(
+    purchaseOrderId: number,
+    locationId: number
+  ): Promise<Receipt> {
+    const linesResponse = await this.getPurchaseOrderLines(purchaseOrderId);
+    console.log(
+      `[DEBUG] PO ${purchaseOrderId} lines: total=${linesResponse.total}, count=${linesResponse.results.length}`,
+      linesResponse.results.length > 0
+        ? `first line: ${JSON.stringify(linesResponse.results[0])}`
+        : '(no lines)'
+    );
+
+    await this.createReceipt(purchaseOrderId, locationId);
+    const receipt = await this.getReceiptByOrderId(purchaseOrderId);
+    console.log(`[DEBUG] Created receipt ${receipt.id} for PO ${purchaseOrderId}`);
+
+    for (const line of linesResponse.results) {
+      if (line.item_id == null) {
+        console.log(`[DEBUG] Skipping PO line ${line.id}: item_id is null/undefined`);
+        continue;
+      }
+      const linePayload = { item_id: line.item_id, qty: line.qty ?? 0, receipt_id: receipt.id, unit_cost: line.unit_cost };
+      console.log(`[DEBUG] Adding receipt line for PO line ${line.id}:`, JSON.stringify(linePayload));
+      try {
+        const result = await this.addReceiptLine(receipt.id, linePayload);
+        console.log(`[DEBUG] Receipt line added for PO line ${line.id}:`, JSON.stringify(result));
+      } catch (err) {
+        console.error(`[DEBUG] Failed to add receipt line for PO line ${line.id}:`, err);
+        throw err;
+      }
+    }
+    return receipt;
+  }
+
+  async completeReceipt(receiptId: number): Promise<Receipt> {
+    const path = `/api/purchasing/receipts/${encodeURIComponent(String(receiptId))}`;
+    const url = buildHeartlandUrl(this.baseUrl, path);
+    return httpPutJson<Receipt>(url, this.token, { status: 'accepted' });
   }
 
   async runReport<T = unknown>(

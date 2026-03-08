@@ -795,6 +795,340 @@ describe('clients', () => {
     });
   });
 
+  it('DefaultHeartlandApiClient getPurchaseOrderLines builds correct URL', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ total: 1, pages: 1, results: [{ id: 1, item_id: 10, qty: 3, unit_cost: 5.0 }] })
+    );
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    const result = await client.getPurchaseOrderLines(42);
+
+    expect(mockedHttps.get.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/purchasing/orders/42/lines?per_page=500'
+    );
+    expect(result).toEqual({ total: 1, pages: 1, results: [{ id: 1, item_id: 10, qty: 3, unit_cost: 5.0 }] });
+  });
+
+  it('DefaultHeartlandApiClient createReceipt posts to correct URL with payload', async () => {
+    const { res, emitBody } = makeMockResponse(201, '');
+    let writtenPayload = '';
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: (payload: string) => { writtenPayload += payload; },
+          end: () => { process.nextTick(emitBody); },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    await client.createReceipt(5, 2);
+
+    expect(mockedHttps.request.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/purchasing/receipts'
+    );
+    expect(JSON.parse(writtenPayload)).toEqual({ order_id: 5, receive_at_location_id: 2 });
+  });
+
+  it('DefaultHeartlandApiClient getReceiptByOrderId fetches pending receipt by order_id', async () => {
+    const receiptListBody = JSON.stringify({
+      total: 1,
+      pages: 1,
+      results: [{ id: 99, order_id: 5, status: 'pending' }],
+    });
+    const { res, emitBody } = makeMockResponse(200, receiptListBody);
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    const result = await client.getReceiptByOrderId(5);
+
+    expect(mockedHttps.get.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/purchasing/receipts?order_id=5&status=pending'
+    );
+    expect(result).toEqual({ id: 99, order_id: 5, status: 'pending' });
+  });
+
+  it('DefaultHeartlandApiClient addReceiptLine posts to correct URL with payload', async () => {
+    const { res, emitBody } = makeMockResponse(201, JSON.stringify({ id: 1 }));
+    let writtenPayload = '';
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: (payload: string) => { writtenPayload += payload; },
+          end: () => { process.nextTick(emitBody); },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    await client.addReceiptLine(99, { item_id: 10, qty: 3, unit_cost: 5.0 });
+
+    expect(mockedHttps.request.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/purchasing/receipts/99/lines'
+    );
+    expect(JSON.parse(writtenPayload)).toEqual({ item_id: 10, qty: 3, unit_cost: 5.0 });
+  });
+
+  it('DefaultHeartlandApiClient createReceiptFromPurchaseOrder fetches PO lines, creates receipt, and adds a line per item', async () => {
+    const poLinesBody = JSON.stringify({
+      total: 2,
+      pages: 1,
+      results: [
+        { id: 1, item_id: 10, qty: 3, unit_cost: 5.0 },
+        { id: 2, item_id: 20, qty: 1, unit_cost: 12.5 },
+      ],
+    });
+    const receiptListBody = JSON.stringify({
+      total: 1,
+      pages: 1,
+      results: [{ id: 99, order_id: 5, status: 'pending' }],
+    });
+    const lineBody = JSON.stringify({ id: 1 });
+
+    // GET calls: first PO lines, then receipt lookup
+    const getBodies = [poLinesBody, receiptListBody];
+    let getCallIndex = 0;
+    const capturedGetUrls: string[] = [];
+    mockedHttps.get.mockImplementation(
+      (
+        url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        capturedGetUrls.push(url as string);
+        const body = getBodies[getCallIndex++];
+        const { res: getRes, emitBody: emitGetBody } = makeMockResponse(200, body);
+        callback(getRes);
+        process.nextTick(emitGetBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    // POST calls: createReceipt (empty response), then two addReceiptLine
+    const postBodies = ['', lineBody, lineBody];
+    let postCallIndex = 0;
+    const capturedPostUrls: string[] = [];
+    const capturedPayloads: string[] = [];
+    mockedHttps.request.mockImplementation(
+      (
+        url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        capturedPostUrls.push(url as string);
+        const body = postBodies[postCallIndex++];
+        const { res: postRes, emitBody: emitPostBody } = makeMockResponse(201, body);
+        let payload = '';
+        callback(postRes);
+        return {
+          on: jest.fn(),
+          write: (data: string) => { payload += data; },
+          end: () => {
+            capturedPayloads.push(payload);
+            process.nextTick(emitPostBody);
+          },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    const result = await client.createReceiptFromPurchaseOrder(5, 2);
+
+    expect(capturedGetUrls[0]).toBe('https://heartland.example/api/purchasing/orders/5/lines?per_page=500');
+    expect(capturedGetUrls[1]).toBe('https://heartland.example/api/purchasing/receipts?order_id=5&status=pending');
+    expect(capturedPostUrls[0]).toBe('https://heartland.example/api/purchasing/receipts');
+    expect(JSON.parse(capturedPayloads[0])).toEqual({ order_id: 5, receive_at_location_id: 2 });
+    expect(capturedPostUrls[1]).toBe('https://heartland.example/api/purchasing/receipts/99/lines');
+    expect(JSON.parse(capturedPayloads[1])).toEqual({ item_id: 10, qty: 3, receipt_id: 99, unit_cost: 5.0 });
+    expect(capturedPostUrls[2]).toBe('https://heartland.example/api/purchasing/receipts/99/lines');
+    expect(JSON.parse(capturedPayloads[2])).toEqual({ item_id: 20, qty: 1, receipt_id: 99, unit_cost: 12.5 });
+    expect(result).toEqual({ id: 99, order_id: 5, status: 'pending' });
+  });
+
+  it('DefaultHeartlandApiClient createReceiptFromPurchaseOrder skips lines without item_id', async () => {
+    const poLinesBody = JSON.stringify({
+      total: 2,
+      pages: 1,
+      results: [
+        { id: 1, item_id: 10, qty: 2, unit_cost: 8.0 },
+        { id: 2, qty: 1, unit_cost: 3.0 }, // no item_id
+      ],
+    });
+    const receiptListBody = JSON.stringify({
+      total: 1,
+      pages: 1,
+      results: [{ id: 55, order_id: 7, status: 'pending' }],
+    });
+
+    const getBodies = [poLinesBody, receiptListBody];
+    let getCallIndex = 0;
+    mockedHttps.get.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        const body = getBodies[getCallIndex++];
+        const { res: getRes, emitBody: emitGetBody } = makeMockResponse(200, body);
+        callback(getRes);
+        process.nextTick(emitGetBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    let postCallIndex = 0;
+    const postBodies = ['', JSON.stringify({ id: 1 })];
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        const body = postBodies[postCallIndex++];
+        const { res: postRes, emitBody: emitPostBody } = makeMockResponse(201, body);
+        callback(postRes);
+        return {
+          on: jest.fn(),
+          write: () => {},
+          end: () => { process.nextTick(emitPostBody); },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    await client.createReceiptFromPurchaseOrder(7, 3);
+
+    // Only 1 addReceiptLine call (the line without item_id is skipped), plus 1 createReceipt = 2 total POSTs
+    expect(mockedHttps.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('DefaultHeartlandApiClient completeReceipt PUTs status accepted', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ id: 99, status: 'accepted' })
+    );
+    let writtenPayload = '';
+    mockedHttps.request.mockImplementation(
+      (
+        _url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: (payload: string) => { writtenPayload += payload; },
+          end: () => { process.nextTick(emitBody); },
+        } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient('https://heartland.example', 'token-abc');
+    const result = await client.completeReceipt(99);
+
+    expect(mockedHttps.request.mock.calls[0][0]).toBe(
+      'https://heartland.example/api/purchasing/receipts/99'
+    );
+    expect(mockedHttps.request.mock.calls[0][1]).toMatchObject({ method: 'PUT' });
+    expect(JSON.parse(writtenPayload)).toEqual({ status: 'accepted' });
+    expect(result).toEqual({ id: 99, status: 'accepted' });
+  });
+
+  it('DefaultHeartlandApiClient listPurchaseOrders builds correct URL with status and page', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ total: 2, pages: 1, results: [{ id: 1 }, { id: 2 }] })
+    );
+    mockedHttps.get.mockImplementation(
+      (
+        url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient(
+      'https://heartland.example',
+      'token-abc'
+    );
+
+    const result = await client.listPurchaseOrders('open', 2);
+
+    const calledUrl = mockedHttps.get.mock.calls[0][0] as string;
+    expect(calledUrl).toBe(
+      'https://heartland.example/api/purchasing/orders?status=open&page=2'
+    );
+    expect(result).toEqual({ total: 2, pages: 1, results: [{ id: 1 }, { id: 2 }] });
+  });
+
+  it('DefaultHeartlandApiClient listPurchaseOrders defaults to page 1', async () => {
+    const { res, emitBody } = makeMockResponse(
+      200,
+      JSON.stringify({ total: 0, pages: 0, results: [] })
+    );
+    mockedHttps.get.mockImplementation(
+      (
+        url: string,
+        _options: Record<string, unknown>,
+        callback: (res: EventEmitter) => void
+      ) => {
+        callback(res);
+        process.nextTick(emitBody);
+        return { on: jest.fn() } as unknown;
+      }
+    );
+
+    const client = new DefaultHeartlandApiClient(
+      'https://heartland.example',
+      'token-abc'
+    );
+
+    await client.listPurchaseOrders('pending');
+
+    const calledUrl = mockedHttps.get.mock.calls[0][0] as string;
+    expect(calledUrl).toBe(
+      'https://heartland.example/api/purchasing/orders?status=pending&page=1'
+    );
+  });
+
   it('DefaultToyhouseMasterDataClient returns null for missing item numbers', async () => {
     const csv = ['Item #,Bricklink Id', ''].join('\n');
     mockS3Send.mockResolvedValue({ Body: Readable.from([csv]) });

@@ -58,6 +58,7 @@ This is a monorepo with three TypeScript subprojects, each with its own `package
 | `transaction/index.ts` | Heartland `sales_transaction_completed` webhook (Lambda Function URL) | Runs a set of `TransactionCompletionStrategy` checks on each sale/return; alerts GroupMe on failures |
 | `item/index.ts` | Heartland `item_created` webhook (Lambda Function URL) | Fetches an image from BrickLink or Toyhouse master data CSV and updates the new item in Heartland; sets tags. BrickLink item type is derived from `department`: `"Minifigs"` → `MINIFIG`, all others → `SET`. Sub-department `"New In Box"` uses Toyhouse instead of BrickLink. |
 | `undersold-items/index.ts` | EventBridge schedule (daily 03:00 UTC) | Queries Heartland analyzer report for stale inventory (not sold in 60 days), builds an Excel workbook, uploads to S3, sends a presigned link to GroupMe |
+| `receive-open-orders/index.ts` | EventBridge schedule (daily 03:00 UTC) | Pages through open purchase orders; for the first PO with a `receive_at_location_id`, creates a receipt (one line per PO line) and completes it (`status: accepted`) |
 
 ### Strategy pattern for transaction checks
 
@@ -75,20 +76,22 @@ The three completion-detection strategies (`TypeAndStatusCompletionStrategy`, `B
 ### Client abstractions (`heartland-webhook/src/clients.ts`)
 
 All external API calls go through interfaces with default implementations:
-- `HeartlandApiClient` / `DefaultHeartlandApiClient` — Heartland REST API (Bearer token auth)
+- `HeartlandApiClient` / `DefaultHeartlandApiClient` — Heartland REST API (Bearer token auth); methods: `getTicketLines`, `getInventoryValues`, `getInventoryItem`, `updateInventoryItem`, `updateInventoryItemImage`, `runReport`, `listPurchaseOrders`, `getPurchaseOrderLines`, `createReceipt`, `addReceiptLine`, `createReceiptFromPurchaseOrder`, `completeReceipt`
 - `GroupMeClient` / `DefaultGroupMeClient` — GroupMe bot messages
 - `BrickLinkClient` / `DefaultBrickLinkClient` — BrickLink REST API (OAuth 1.0a)
 - `ToyhouseMasterDataClient` / `DefaultToyhouseMasterDataClient` — reads `toyhouse_master_data.csv` from S3; cached in Lambda memory
 
 ### CDK stack (`operational-hooks-cdk/lib/operational-hooks-stack.ts`)
 
-One stack deploys everything into a VPC with a NAT Gateway (fixed Elastic IP for Heartland IP-allowlisting). The CDK reads compiled JS directly from `../heartland-webhook/dist` and `../heartland-webhook-custom-resource/dist`, so Lambda packages must be built before deploying.
+One stack deploys all Lambdas. The CDK reads compiled JS directly from `../heartland-webhook/dist` and `../heartland-webhook-custom-resource/dist`, so Lambda packages must be built before deploying.
 
 A CloudFormation custom resource Lambda (`heartland-webhook-custom-resource`) auto-registers/deregisters webhooks with Heartland on stack create/delete.
 
+The Secrets Manager secret ARN is hardcoded in the CDK stack (`arn:aws:secretsmanager:us-east-1:445473841172:secret:OperationalSecrets/free-7mCBwe`).
+
 ### Secrets & environment variables
 
-All secrets live in a single Secrets Manager secret named `OperationalSecrets` (configurable via `OperationalSecretsName` CDK parameter):
+All secrets live in a single Secrets Manager secret named `OperationalSecrets`:
 
 ```json
 {
@@ -104,7 +107,7 @@ Lambda environment variables used at runtime:
 - `HEARTLAND_API_BASE_URL` — e.g. `https://bamherndon.retail.heartland.us`
 - `OPERATIONAL_SECRET_ARN` — Secrets Manager secret name/ARN
 - `GROUPME_BOT_ID` — GroupMe bot ID for alerts
-- `TOYHOUSE_MASTER_DATA_S3_PATH` / `TOYHOUSE_MASTER_DATA_S3_URI` — S3 path to `toyhouse_master_data.csv`
+- `TOYHOUSE_MASTER_DATA_S3_URI` — S3 URI to `toyhouse_master_data.csv` (item handler only)
 - `UNDERSOLD_REPORTS_S3_BUCKET` — S3 bucket for generated Excel reports (undersold-items handler only)
 
 ### External APIs

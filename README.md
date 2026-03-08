@@ -24,6 +24,9 @@ Receives `item_created` webhooks from Heartland Retail via a Lambda Function URL
 ### `heartland-webhook/src/handlers/undersold-items/` — Stale inventory report
 Triggered daily at 03:00 UTC by EventBridge. Queries Heartland for items not sold in 60 days, builds an Excel workbook, uploads it to S3, and sends a presigned download link to GroupMe.
 
+### `heartland-webhook/src/handlers/receive-open-orders/` — Auto-receive open purchase orders
+Triggered daily at 03:00 UTC by EventBridge. Pages through open purchase orders and processes the first PO with a `receive_at_location_id`: creates a receipt (one receipt line per PO line) and completes it (`status: accepted`). Posts a GroupMe alert on failure.
+
 ---
 
 ## Project Layout
@@ -35,9 +38,10 @@ OperationalHooks/
       handlers/
         transaction/index.ts      # Sales transaction webhook handler
         item/index.ts             # Item created webhook handler
-        undersold-items/index.ts  # Stale inventory report handler
+        undersold-items/index.ts        # Stale inventory report handler
+        receive-open-orders/index.ts    # Auto-receive open purchase orders handler
       strategies/                 # TransactionCompletionStrategy implementations
-      clients.ts                  # HeartlandApiClient, BrickLinkClient, GroupMeClient, ToyhouseMasterDataClient
+      clients.ts                  # HeartlandApiClient (getTicketLines, getInventoryValues, getInventoryItem, updateInventoryItem, updateInventoryItemImage, runReport, listPurchaseOrders, getPurchaseOrderLines, createReceipt, addReceiptLine, createReceiptFromPurchaseOrder, completeReceipt), BrickLinkClient, GroupMeClient, ToyhouseMasterDataClient
       model.ts                    # Shared types and interfaces
     tests/
     package.json
@@ -56,6 +60,7 @@ OperationalHooks/
   operational-stack-int-tests/    # Integration tests against the deployed stack
     tests/handlers-int.test.ts
     tests/undersold-items-int.test.ts
+    tests/receive-open-orders-int.test.ts
     package.json
 ```
 
@@ -63,7 +68,7 @@ OperationalHooks/
 
 ## Secrets and Configuration
 
-All secrets live in a single Secrets Manager secret named `OperationalSecrets` (configurable via CDK parameter `OperationalSecretsName`):
+All secrets live in a single Secrets Manager secret named `OperationalSecrets` (ARN hardcoded in the CDK stack):
 
 ```json
 {
@@ -83,8 +88,8 @@ Lambda environment variables:
 |---|---|---|
 | `HEARTLAND_API_BASE_URL` | all | e.g. `https://bamherndon.retail.heartland.us` |
 | `OPERATIONAL_SECRET_ARN` | all | Secrets Manager secret name/ARN |
-| `GROUPME_BOT_ID` | transaction, item, undersold-items | GroupMe bot ID for alerts |
-| `TOYHOUSE_MASTER_DATA_S3_PATH` | item | S3 path to `toyhouse_master_data.csv` |
+| `GROUPME_BOT_ID` | transaction, item, undersold-items, receive-open-orders | GroupMe bot ID for alerts |
+| `TOYHOUSE_MASTER_DATA_S3_URI` | item | S3 URI to `toyhouse_master_data.csv` |
 | `UNDERSOLD_REPORTS_S3_BUCKET` | undersold-items | S3 bucket for generated Excel reports |
 
 ---

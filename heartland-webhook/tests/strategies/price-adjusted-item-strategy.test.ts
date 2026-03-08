@@ -17,6 +17,13 @@ describe('PriceAdjustedItemStrategy', () => {
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
       runReport: jest.fn(),
+      listPurchaseOrders: jest.fn(),
+      getPurchaseOrderLines: jest.fn(),
+      createReceipt: jest.fn(),
+      addReceiptLine: jest.fn(),
+      createReceiptFromPurchaseOrder: jest.fn(),
+      getReceiptByOrderId: jest.fn(),
+      completeReceipt: jest.fn(),
     };
   };
 
@@ -187,6 +194,13 @@ describe('PriceAdjustedItemStrategy', () => {
       updateInventoryItem: jest.fn(),
       updateInventoryItemImage: jest.fn(),
       runReport: jest.fn(),
+      listPurchaseOrders: jest.fn(),
+      getPurchaseOrderLines: jest.fn(),
+      createReceipt: jest.fn(),
+      addReceiptLine: jest.fn(),
+      createReceiptFromPurchaseOrder: jest.fn(),
+      getReceiptByOrderId: jest.fn(),
+      completeReceipt: jest.fn(),
     };
 
     const strategy = new PriceAdjustedItemStrategy(mockClient);

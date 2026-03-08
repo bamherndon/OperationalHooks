@@ -12,6 +12,13 @@ function makeMockClient(runReportResponse: unknown): HeartlandApiClient {
     updateInventoryItem: jest.fn(),
     updateInventoryItemImage: jest.fn(),
     runReport: jest.fn().mockResolvedValue(runReportResponse),
+    listPurchaseOrders: jest.fn(),
+    getPurchaseOrderLines: jest.fn(),
+    createReceipt: jest.fn(),
+    addReceiptLine: jest.fn(),
+    createReceiptFromPurchaseOrder: jest.fn(),
+    getReceiptByOrderId: jest.fn(),
+    completeReceipt: jest.fn(),
   };
 }
 

@@ -144,6 +144,44 @@ export class OperationalHooksStack extends cdk.Stack {
     });
 
     /**
+     * 2c) Receive-open-orders handler Lambda
+     *     Processes all open purchase orders daily: creates and completes a receipt for each.
+     */
+    const receiveOpenOrdersFn = new lambda.Function(this, 'ReceiveOpenOrdersFn', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/handlers/receive-open-orders/index.handler',
+      code: lambda.Code.fromAsset(
+        path.join(__dirname, '..', '..', 'heartland-webhook')
+      ),
+      description: 'Daily: creates and completes a receipt for every open purchase order',
+      timeout: cdk.Duration.minutes(5),
+      environment: {
+        HEARTLAND_API_BASE_URL: 'https://bamherndon.retail.heartland.us',
+        OPERATIONAL_SECRET_ARN: operationalSecrets.secretArn,
+        GROUPME_BOT_ID: '89bc08a0ee7697547bd331852d',
+      },
+    });
+    operationalSecrets.grantRead(receiveOpenOrdersFn);
+
+    const receiveOpenOrdersFnUrl = receiveOpenOrdersFn.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.AWS_IAM,
+    });
+
+    new cdk.CfnOutput(this, 'ReceiveOpenOrdersFunctionUrl', {
+      value: receiveOpenOrdersFnUrl.url,
+      description: 'Lambda Function URL for ReceiveOpenOrders scheduled handler',
+    });
+
+    new events.Rule(this, 'ReceiveOpenOrdersDailySchedule', {
+      description: 'Trigger ReceiveOpenOrders Lambda daily at 03:00 UTC',
+      schedule: events.Schedule.cron({
+        minute: '0',
+        hour: '3',
+      }),
+      targets: [new targets.LambdaFunction(receiveOpenOrdersFn)],
+    });
+
+    /**
      * 3) Custom resource Lambda that registers/deregisters the webhook.
      *    Uses the compiled JS from ../heartland-webhook-custom-resource/dist.
      */
