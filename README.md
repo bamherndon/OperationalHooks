@@ -25,7 +25,7 @@ Receives `item_created` webhooks from Heartland Retail via a Lambda Function URL
 Triggered daily at 03:00 UTC by EventBridge. Queries Heartland for items not sold in 60 days, builds an Excel workbook, uploads it to S3, and sends a presigned download link to GroupMe.
 
 ### `heartland-webhook/src/handlers/receive-open-orders/` — Auto-receive open purchase orders
-Triggered daily at 03:00 UTC by EventBridge. Pages through open purchase orders and processes the first PO with a `receive_at_location_id`: creates a receipt (one receipt line per PO line) and completes it (`status: accepted`). Posts a GroupMe alert on failure.
+Triggered daily at 03:00 UTC by EventBridge. Pages through all open purchase orders and for each PO with a `receive_at_location_id`, creates a receipt (one receipt line per PO line) and completes it (`status: accepted`). Posts a GroupMe alert per failed PO and continues processing the rest.
 
 ---
 
@@ -41,7 +41,7 @@ OperationalHooks/
         undersold-items/index.ts        # Stale inventory report handler
         receive-open-orders/index.ts    # Auto-receive open purchase orders handler
       strategies/                 # TransactionCompletionStrategy implementations
-      clients.ts                  # HeartlandApiClient (getTicketLines, getInventoryValues, getInventoryItem, updateInventoryItem, updateInventoryItemImage, runReport, listPurchaseOrders, getPurchaseOrderLines, createReceipt, addReceiptLine, createReceiptFromPurchaseOrder, completeReceipt), BrickLinkClient, GroupMeClient, ToyhouseMasterDataClient
+      clients.ts                  # HeartlandApiClient (getTicketLines, getInventoryValues, getInventoryItem, updateInventoryItem, updateInventoryItemImage, runReport, listPurchaseOrders, getPurchaseOrderLines, createReceipt, getReceiptByOrderId, addReceiptLine, createReceiptFromPurchaseOrder, completeReceipt), BrickLinkClient, GroupMeClient, ToyhouseMasterDataClient
       model.ts                    # Shared types and interfaces
     tests/
     package.json

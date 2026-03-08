@@ -58,7 +58,7 @@ This is a monorepo with three TypeScript subprojects, each with its own `package
 | `transaction/index.ts` | Heartland `sales_transaction_completed` webhook (Lambda Function URL) | Runs a set of `TransactionCompletionStrategy` checks on each sale/return; alerts GroupMe on failures |
 | `item/index.ts` | Heartland `item_created` webhook (Lambda Function URL) | Fetches an image from BrickLink or Toyhouse master data CSV and updates the new item in Heartland; sets tags. BrickLink item type is derived from `department`: `"Minifigs"` → `MINIFIG`, all others → `SET`. Sub-department `"New In Box"` uses Toyhouse instead of BrickLink. |
 | `undersold-items/index.ts` | EventBridge schedule (daily 03:00 UTC) | Queries Heartland analyzer report for stale inventory (not sold in 60 days), builds an Excel workbook, uploads to S3, sends a presigned link to GroupMe |
-| `receive-open-orders/index.ts` | EventBridge schedule (daily 03:00 UTC) | Pages through open purchase orders; for the first PO with a `receive_at_location_id`, creates a receipt (one line per PO line) and completes it (`status: accepted`) |
+| `receive-open-orders/index.ts` | EventBridge schedule (daily 03:00 UTC) | Pages through all open purchase orders; for each PO with a `receive_at_location_id`, creates a receipt (one line per PO line) and completes it (`status: accepted`); alerts GroupMe on per-PO failures |
 
 ### Strategy pattern for transaction checks
 
@@ -76,7 +76,7 @@ The three completion-detection strategies (`TypeAndStatusCompletionStrategy`, `B
 ### Client abstractions (`heartland-webhook/src/clients.ts`)
 
 All external API calls go through interfaces with default implementations:
-- `HeartlandApiClient` / `DefaultHeartlandApiClient` — Heartland REST API (Bearer token auth); methods: `getTicketLines`, `getInventoryValues`, `getInventoryItem`, `updateInventoryItem`, `updateInventoryItemImage`, `runReport`, `listPurchaseOrders`, `getPurchaseOrderLines`, `createReceipt`, `addReceiptLine`, `createReceiptFromPurchaseOrder`, `completeReceipt`
+- `HeartlandApiClient` / `DefaultHeartlandApiClient` — Heartland REST API (Bearer token auth); methods: `getTicketLines`, `getInventoryValues`, `getInventoryItem`, `updateInventoryItem`, `updateInventoryItemImage`, `runReport`, `listPurchaseOrders`, `getPurchaseOrderLines`, `createReceipt`, `getReceiptByOrderId`, `addReceiptLine`, `createReceiptFromPurchaseOrder`, `completeReceipt`
 - `GroupMeClient` / `DefaultGroupMeClient` — GroupMe bot messages
 - `BrickLinkClient` / `DefaultBrickLinkClient` — BrickLink REST API (OAuth 1.0a)
 - `ToyhouseMasterDataClient` / `DefaultToyhouseMasterDataClient` — reads `toyhouse_master_data.csv` from S3; cached in Lambda memory
